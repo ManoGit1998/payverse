@@ -1,0 +1,378 @@
+# api-gateway — edge routing, JWT validation, Redis rate limiting, CORS, correlation IDs.
+# Every value that differs per environment comes from an env var (see .env.example).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: api-gateway
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  webflux:
+    problemdetails:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+          redis-rate-limiter:
+            include-headers: true
+          default-filters:
+            - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+            - RemoveRequestHeader=Cookie
+          routes:
+          - id: auth-otp
+            uri: ${payverse.services.auth}
+            predicates:
+              - Path=/api/v1/auth/otp/**,/api/v1/auth/pin/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@ipKeyResolver}"
+                  redis-rate-limiter.replenishRate: 1
+                  redis-rate-limiter.burstCapacity: 60
+                  redis-rate-limiter.requestedTokens: 12   # = 5 requests/minute per IP
+              - name: CircuitBreaker
+                args:
+                  name: auth
+                  fallbackUri: forward:/fallback/auth-service
+          - id: auth
+            uri: ${payverse.services.auth}
+            predicates:
+              - Path=/api/v1/auth/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: auth
+                  fallbackUri: forward:/fallback/auth-service
+          - id: user
+            uri: ${payverse.services.user}
+            predicates:
+              - Path=/api/v1/users/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: user
+                  fallbackUri: forward:/fallback/user-service
+          - id: wallet
+            uri: ${payverse.services.wallet}
+            predicates:
+              - Path=/api/v1/wallets/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: wallet
+                  fallbackUri: forward:/fallback/wallet-service
+          - id: transaction
+            uri: ${payverse.services.transaction}
+            predicates:
+              - Path=/api/v1/transfers/**,/api/v1/transactions/**,/api/v1/money-requests/**,/api/v1/split-bills/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: transaction
+                  fallbackUri: forward:/fallback/transaction-service
+          - id: payment
+            uri: ${payverse.services.payment}
+            predicates:
+              - Path=/api/v1/vpa/**,/api/v1/collect-requests/**,/api/v1/qr/**,/api/v1/pg/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: payment
+                  fallbackUri: forward:/fallback/payment-service
+          - id: bill
+            uri: ${payverse.services.bill}
+            predicates:
+              - Path=/api/v1/billers/**,/api/v1/bills/**,/api/v1/mandates/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: bill
+                  fallbackUri: forward:/fallback/bill-service
+          - id: rewards
+            uri: ${payverse.services.rewards}
+            predicates:
+              - Path=/api/v1/rewards/**,/api/v1/admin/cashback-rules/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: rewards
+                  fallbackUri: forward:/fallback/rewards-service
+          - id: notification
+            uri: ${payverse.services.notification}
+            predicates:
+              - Path=/api/v1/notifications/**,/api/v1/admin/templates/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: notification
+                  fallbackUri: forward:/fallback/notification-service
+          - id: fraud-admin
+            uri: ${payverse.services.fraud}
+            predicates:
+              - Path=/api/v1/admin/risk/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: fraud
+                  fallbackUri: forward:/fallback/fraud-service
+          - id: recon-admin
+            uri: ${payverse.services.recon}
+            predicates:
+              - Path=/api/v1/admin/recon/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: recon
+                  fallbackUri: forward:/fallback/recon-service
+          - id: admin
+            uri: ${payverse.services.admin}
+            predicates:
+              - Path=/api/v1/admin/**
+            filters:
+              - name: RequestRateLimiter
+                args:
+                  key-resolver: "#{@userOrIpKeyResolver}"
+                  redis-rate-limiter.replenishRate: ${payverse.gateway.rate-limit.replenish-rate:20}
+                  redis-rate-limiter.burstCapacity: ${payverse.gateway.rate-limit.burst-capacity:40}
+              - name: CircuitBreaker
+                args:
+                  name: admin
+                  fallbackUri: forward:/fallback/admin-service
+          - id: api-docs-auth
+            uri: ${payverse.services.auth}
+            predicates:
+              - Path=/api-docs/auth
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-user
+            uri: ${payverse.services.user}
+            predicates:
+              - Path=/api-docs/user
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-wallet
+            uri: ${payverse.services.wallet}
+            predicates:
+              - Path=/api-docs/wallet
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-transaction
+            uri: ${payverse.services.transaction}
+            predicates:
+              - Path=/api-docs/transaction
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-payment
+            uri: ${payverse.services.payment}
+            predicates:
+              - Path=/api-docs/payment
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-bill
+            uri: ${payverse.services.bill}
+            predicates:
+              - Path=/api-docs/bill
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-rewards
+            uri: ${payverse.services.rewards}
+            predicates:
+              - Path=/api-docs/rewards
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-notification
+            uri: ${payverse.services.notification}
+            predicates:
+              - Path=/api-docs/notification
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-fraud
+            uri: ${payverse.services.fraud}
+            predicates:
+              - Path=/api-docs/fraud
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-recon
+            uri: ${payverse.services.recon}
+            predicates:
+              - Path=/api-docs/recon
+            filters:
+              - SetPath=/v3/api-docs
+          - id: api-docs-admin
+            uri: ${payverse.services.admin}
+            predicates:
+              - Path=/api-docs/admin
+            filters:
+              - SetPath=/v3/api-docs
+
+payverse:
+  services:
+    auth: ${AUTH_SERVICE_URL:http://localhost:8081}
+    user: ${USER_SERVICE_URL:http://localhost:8082}
+    wallet: ${WALLET_SERVICE_URL:http://localhost:8083}
+    transaction: ${TRANSACTION_SERVICE_URL:http://localhost:8084}
+    payment: ${PAYMENT_SERVICE_URL:http://localhost:8085}
+    bill: ${BILL_SERVICE_URL:http://localhost:8086}
+    rewards: ${REWARDS_SERVICE_URL:http://localhost:8087}
+    notification: ${NOTIFICATION_SERVICE_URL:http://localhost:8088}
+    fraud: ${FRAUD_SERVICE_URL:http://localhost:8089}
+    recon: ${RECON_SERVICE_URL:http://localhost:8090}
+    admin: ${ADMIN_SERVICE_URL:http://localhost:8091}
+  security:
+    jwk-set-uri: ${payverse.services.auth}/.well-known/jwks.json
+    issuer: ${JWT_ISSUER:http://localhost:8081}
+    audience: payverse
+  gateway:
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 10s
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - name: auth-service
+        url: /api-docs/auth
+      - name: user-service
+        url: /api-docs/user
+      - name: wallet-service
+        url: /api-docs/wallet
+      - name: transaction-service
+        url: /api-docs/transaction
+      - name: payment-service
+        url: /api-docs/payment
+      - name: bill-payment-service
+        url: /api-docs/bill
+      - name: rewards-service
+        url: /api-docs/rewards
+      - name: notification-service
+        url: /api-docs/notification
+      - name: fraud-risk-service
+        url: /api-docs/fraud
+      - name: reconciliation-service
+        url: /api-docs/recon
+      - name: admin-service
+        url: /api-docs/admin
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    redis:
+      enabled: true
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        step: 30s
+
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:logstash}
+    json:
+      customizer: com.payverse.common.web.masking.PiiMaskingLogCustomizer
+  level:
+    root: INFO
+    com.payverse: INFO
