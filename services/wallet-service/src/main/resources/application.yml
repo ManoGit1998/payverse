@@ -1,0 +1,116 @@
+# wallet-service — wallets, double-entry ledger, KYC-tier limits, idempotent postings, freeze/unfreeze.
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+
+spring:
+  application:
+    name: wallet-service
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/wallet_db
+    username: wallet_svc
+    password: ${SERVICE_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration,classpath:db/common
+    # shared db/common migrations (idempotent) may be added after a service's own V1+
+    out-of-order: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: wallet-service
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+payverse:
+  wallet:
+    auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
+    max-transaction-amount: 100000
+    lock-wait: 10s
+    lock-lease: 30s
+    summary-cache-ttl: 60s
+    limits:
+      NONE: { max-balance: 0, monthly-load: 0, daily-debit: 0 }
+      MIN_KYC: { max-balance: 10000, monthly-load: 10000, daily-debit: 10000 }
+      FULL_KYC: { max-balance: 200000, monthly-load: 200000, daily-debit: 100000 }
+  service-client:
+    client-id: wallet-service
+    client-secret: ${SERVICE_CLIENT_SECRET:}
+    token-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/api/v1/auth/oauth/token
+  security:
+    jwk-set-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+    issuer: ${JWT_ISSUER:http://localhost:8081}
+    audience: payverse
+  crypto:
+    key-id: ${PAYVERSE_CRYPTO_KEY_ID:v1}
+    encryption-key: ${PAYVERSE_CRYPTO_ENCRYPTION_KEY}
+    blind-index-key: ${PAYVERSE_CRYPTO_BLIND_INDEX_KEY}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        step: 30s
+
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:logstash}
+    json:
+      customizer: com.payverse.common.web.masking.PiiMaskingLogCustomizer
+  level:
+    root: INFO
+    com.payverse: INFO

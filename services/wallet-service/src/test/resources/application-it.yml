@@ -1,0 +1,24 @@
+# Shared settings for Testcontainers integration tests.
+spring:
+  kafka:
+    consumer:
+      auto-offset-reset: earliest
+payverse:
+  outbox:
+    poll-interval: 100ms
+  crypto:
+    key-id: test
+    encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    blind-index-key: ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=
+management:
+  tracing:
+    export:
+      enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
