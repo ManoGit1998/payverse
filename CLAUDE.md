@@ -9,8 +9,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 |---|---|---|
 | 0 | Plan: architecture, events, schemas, APIs | ✅ approved 2026-10-13 |
 | 1 | Parent POM, shared libs, api-gateway, docker-compose, Makefile | ✅ done 2026-10-13 |
-| 2 | auth-service + user-service | ⏳ next |
-| 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | |
+| 2 | auth-service + user-service | ✅ done 2026-10-14 |
+| 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ⏳ next |
 | 4 | transaction-service + payment-service (saga, UPI sim, QR) | |
 | 5 | notification-service + rewards-service | |
 | 6 | bill-payment-service + fraud-risk-service | |
@@ -45,6 +45,22 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - D9 PII: AES-256-GCM `EncryptedStringConverter` + HMAC blind index for lookups; masking with `@Masked` and log scrubbing.
 - D10 API collections are `.http` files in `http/`. D11 All external providers are named `Mock*` adapters.
 
+## Phase 2 decisions
+
+- KYC tiers are `NONE` → `MIN_KYC` → `FULL_KYC`. `NONE` was added: mobile verified only. Wallet limits per tier come in Phase 3.
+- Refresh tokens are opaque (only their SHA-256 is stored), rotated on every use, with family revocation on reuse. Access tokens are RS256 JWTs (15m).
+- Signing keys are in `auth_db.signing_keys` with the private key encrypted. auth-service validates its own tokens from that key store; every other service uses the JWKS URL.
+- Service-to-service: `POST /api/v1/auth/oauth/token` (client_credentials) issues role `SERVICE`. Dev uses one shared `SERVICE_CLIENT_SECRET`.
+- Mobile → userId resolution is owned by auth (`/internal/auth/users/lookup`); user-service stores only the masked mobile.
+- user-service aggregates are immutable **records** (`with…` methods), so MapStruct maps them to API responses. auth-service
+  domain classes are mutable (fluent accessors), so its DTOs use static factories.
+- Mocks: `LogOtpSender` (OTP in logs, `make otp`), `MockKycVerifier` (rejects numbers containing `9999`), `MockDocumentStorage` (discards bytes).
+- `@Transactional(noRollbackFor = PayverseException.class)` wherever a failed attempt must be persisted (PIN failures, refresh reuse revocation, KYC rejections).
+- Docker Postgres is published on host port **5433** (`POSTGRES_PORT`): the dev Mac runs a native PostgreSQL 18 on 5432.
+- Service containers: `mem_limit 512m`, `-Xmx256m`, capped metaspace / code cache / direct memory, `MALLOC_ARENA_MAX=2`
+  (measured RSS: gateway ~345 MiB, auth/user ~395 MiB).
+- JaCoCo `check` fails the build if any `com.payverse.*.domain*` / `*.application*` package is under 80% line coverage.
+
 ## Conventions
 
 - Packages: `com.payverse.<service>.{api,application,domain,infrastructure}`. `domain` may depend only on
@@ -66,6 +82,7 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - Security: services get the default chain from `common-security`. Add public paths via
   `payverse.security.public-paths` or a `PayverseHttpSecurityCustomizer` bean. Service-to-service calls to
   `/internal/**` need a token with role `SERVICE` (auth-service client-credentials, Phase 2).
+- Profiles/IDs in tests: random UUIDs, random mobiles (`"9" + 9 digits`), random PANs, `TestAadhaar.random()`.
 - Logging: JSON (logstash) by default with PII scrubbing; profile `plainlog` gives readable text. Never log
   raw PII, tokens or request bodies.
 - Ports: gateway 8080, auth 8081, user 8082, wallet 8083, transaction 8084, payment 8085, bill 8086,
@@ -82,7 +99,9 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 ```bash
 make env && make infra-up        # infra (Postgres, Redis, Kafka + topics, Grafana LGTM)
 ./mvnw verify                    # everything (needs Docker); `make test` = unit only
-make run-api-gateway             # run a service from source (loads .env)
+make run-api-gateway             # run a service from source (loads .env, logs to .run/<service>.log)
+make otp                         # latest MOCK OTPs from the auth-service log
+make env-upgrade                 # add settings introduced by later phases to an existing .env
 make build && docker compose --profile infra --profile core up -d   # services in Docker
 make ps                          # containers + memory
 ```
@@ -96,3 +115,6 @@ Grafana: http://localhost:3000 (admin/admin). Gateway: http://localhost:8080.
 - Gateway image is ~630 MB (Ubuntu JRE). Switching to a smaller base is an option for Phase 8.
 - `make e2e` intentionally fails until Phase 8.
 - Audit log (`audit_log` with an append-only trigger) arrives with the first financial action (Phase 3).
+- Access tokens stay valid until expiry (15m) after logout or device revocation; there is no deny-list yet.
+- No penny-drop / name-match verification when linking bank accounts (simulation).
+- `SigningKeyService.rotate()` exists but has no admin endpoint yet (admin-service, Phase 7).

@@ -1,0 +1,102 @@
+### PayVerse — auth-service through the gateway (environment "local").
+# The OTP is printed by the MOCK LogOtpSender: run `make otp` (or check the auth-service log).
+
+### 1. Request a login OTP (sign-up and login are the same flow). Limit: 3 per 10 min per mobile, 5/min per IP.
+POST {{gateway}}/api/v1/auth/otp/request
+Content-Type: application/json
+
+{ "mobile": "{{mobile}}" }
+
+### 2. Verify the OTP → tokens. Replace the otp value with the one from `make otp`.
+POST {{gateway}}/api/v1/auth/otp/verify
+Content-Type: application/json
+
+{ "mobile": "{{mobile}}", "otp": "123456", "deviceId": "http-client-device-01", "deviceName": "IntelliJ HTTP Client" }
+
+> {%
+    client.global.set("accessToken", response.body.accessToken);
+    client.global.set("refreshToken", response.body.refreshToken);
+%}
+
+### 3. Who am I
+GET {{gateway}}/api/v1/auth/me
+Authorization: Bearer {{accessToken}}
+
+### 4. Rotate the refresh token (presenting an old one again revokes the session family)
+POST {{gateway}}/api/v1/auth/token/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{refreshToken}}", "deviceId": "http-client-device-01" }
+
+> {%
+    client.global.set("accessToken", response.body.accessToken);
+    client.global.set("refreshToken", response.body.refreshToken);
+%}
+
+### 5. Set the transaction PIN (4 or 6 digits; weak PINs like 1234 / 0000 are rejected)
+POST {{gateway}}/api/v1/auth/pin
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "pin": "4826" }
+
+### 6. Change the PIN
+POST {{gateway}}/api/v1/auth/pin/change
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "currentPin": "4826", "newPin": "739104" }
+
+### 7. Forgot PIN: request a reset OTP (always 202)
+POST {{gateway}}/api/v1/auth/pin/reset/request
+Content-Type: application/json
+
+{ "mobile": "{{mobile}}" }
+
+### 8. Reset the PIN with the OTP from `make otp`
+POST {{gateway}}/api/v1/auth/pin/reset/confirm
+Content-Type: application/json
+
+{ "mobile": "{{mobile}}", "otp": "123456", "newPin": "582039" }
+
+### 9. Bound devices
+GET {{gateway}}/api/v1/auth/devices
+Authorization: Bearer {{accessToken}}
+
+### 10. Revoke a device (ends its sessions)
+DELETE {{gateway}}/api/v1/auth/devices/some-other-device-id
+Authorization: Bearer {{accessToken}}
+
+### 11. Logout
+POST {{gateway}}/api/v1/auth/logout
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "refreshToken": "{{refreshToken}}" }
+
+### --- Direct calls to auth-service (port 8081): not routed by the gateway ---
+
+### JWKS (public keys used by the gateway and every service)
+GET {{auth}}/.well-known/jwks.json
+
+### Service token (client_credentials). The secret is SERVICE_CLIENT_SECRET in .env.
+POST {{auth}}/api/v1/auth/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=transaction-service&client_secret={{serviceClientSecret}}
+
+> {% client.global.set("serviceToken", response.body.access_token); %}
+
+### Internal: verify a PIN (role SERVICE)
+POST {{auth}}/internal/auth/pin/verify
+Authorization: Bearer {{serviceToken}}
+Content-Type: application/json
+
+{ "userId": "00000000-0000-0000-0000-000000000000", "pin": "4826" }
+
+### Internal: resolve a mobile number to a user
+POST {{auth}}/internal/auth/users/lookup
+Authorization: Bearer {{serviceToken}}
+Content-Type: application/json
+
+{ "mobile": "{{mobile}}" }

@@ -1,0 +1,78 @@
+### PayVerse — user-service through the gateway. Run 01-auth.http steps 1–2 first (sets {{accessToken}}).
+
+### My profile (created automatically from the auth.user-registered event)
+GET {{gateway}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+
+### Update profile
+PUT {{gateway}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "fullName": "Asha Verma", "email": "asha@example.com", "dateOfBirth": "1995-05-20" }
+
+### KYC status
+GET {{gateway}}/api/v1/users/me/kyc
+Authorization: Bearer {{accessToken}}
+
+### NONE → MIN_KYC (MOCK verifier: numbers containing 9999 are rejected, e.g. ABCDE9999F)
+POST {{gateway}}/api/v1/users/me/kyc/min
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "documentType": "PAN", "documentNumber": "ABCDE1234F", "fullName": "Asha Verma", "dateOfBirth": "1995-05-20" }
+
+### MIN_KYC → FULL_KYC: Aadhaar (Verhoeff-valid, e.g. 234123412346) + document (JPEG/PNG/PDF, ≤ 5 MB)
+POST {{gateway}}/api/v1/users/me/kyc/full
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=payverse
+
+--payverse
+Content-Disposition: form-data; name="aadhaarNumber"
+
+234123412346
+--payverse
+Content-Disposition: form-data; name="document"; filename="aadhaar.pdf"
+Content-Type: application/pdf
+
+%PDF-1.7 mock document
+--payverse--
+
+### Link a bank account (first one becomes primary; max 5)
+POST {{gateway}}/api/v1/users/me/bank-accounts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "accountNumber": "123456789012", "ifsc": "HDFC0001234", "holderName": "Asha Verma" }
+
+> {% client.global.set("bankAccountId", response.body.id); %}
+
+### List bank accounts (masked)
+GET {{gateway}}/api/v1/users/me/bank-accounts
+Authorization: Bearer {{accessToken}}
+
+### Make primary
+POST {{gateway}}/api/v1/users/me/bank-accounts/{{bankAccountId}}/primary
+Authorization: Bearer {{accessToken}}
+
+### Unlink
+DELETE {{gateway}}/api/v1/users/me/bank-accounts/{{bankAccountId}}
+Authorization: Bearer {{accessToken}}
+
+### Save a beneficiary (MOBILE | VPA | BANK_ACCOUNT + ifsc)
+POST {{gateway}}/api/v1/users/me/beneficiaries
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "type": "VPA", "value": "ravi@payverse", "nickname": "Ravi" }
+
+###
+POST {{gateway}}/api/v1/users/me/beneficiaries
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "type": "BANK_ACCOUNT", "value": "987654321098", "ifsc": "SBIN0000001", "nickname": "Landlord" }
+
+### List beneficiaries
+GET {{gateway}}/api/v1/users/me/beneficiaries
+Authorization: Bearer {{accessToken}}

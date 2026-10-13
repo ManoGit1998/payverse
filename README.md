@@ -4,7 +4,7 @@ A PhonePe-style digital wallet and payments platform: Java 21, Spring Boot 4.1 m
 PostgreSQL, Redis, Kafka (KRaft) and OpenTelemetry. **No real money moves.** Every external
 integration (UPI switch, payment gateway, billers, SMS/e-mail) is a clearly named mock.
 
-> Status: **Phase 1 — Foundation complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
+> Status: **Phase 2 — auth-service + user-service complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
 > [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full architecture, event catalog and DB schemas.
 
 ## Architecture
@@ -54,7 +54,8 @@ flowchart LR
 | `libs/common-outbox` | Transactional outbox relay, idempotent consumers, DLT | ✅ |
 | `libs/common-test` | Reusable Testcontainers, test JWTs, ArchUnit rules | ✅ |
 | `services/api-gateway` | Spring Cloud Gateway (WebFlux) | ✅ |
-| auth, user | Phase 2 | ⏳ |
+| `services/auth-service` | OTP login, RS256 JWT + JWKS, refresh rotation, devices, Argon2 PIN | ✅ |
+| `services/user-service` | Profile, KYC tiers (mock), bank accounts, beneficiaries | ✅ |
 | wallet | Phase 3 | ⏳ |
 | transaction, payment | Phase 4 | ⏳ |
 | notification, rewards | Phase 5 | ⏳ |
@@ -74,11 +75,17 @@ flowchart LR
 make env                 # .env with random secrets (git-ignored)
 make infra-up            # Postgres, Redis, Kafka + topics, Grafana LGTM (~3.5 GB limit)
 make verify              # all unit + Testcontainers integration tests
-make run-api-gateway     # gateway on http://localhost:8080
+make run-auth-service    # :8081   (each in its own terminal)
+make run-user-service    # :8082
+make run-api-gateway     # :8080
+make otp                 # read the MOCK OTP after requesting one
 ```
 
-Then open [http/00-gateway.http](http/00-gateway.http) in IntelliJ or VS Code (REST Client) and run
-the requests with the `local` environment.
+Then open [http/01-auth.http](http/01-auth.http) and [http/02-user.http](http/02-user.http) in IntelliJ or
+VS Code (REST Client) and run the requests with the `local` environment.
+
+> Postgres from Docker is published on **localhost:5433** (`POSTGRES_PORT`), because a native Postgres
+> often already owns 5432 on macOS.
 
 | URL | What |
 |---|---|
@@ -96,6 +103,8 @@ the requests with the `local` environment.
 | `make up-core` | Build jars + run infra and core services in Docker |
 | `make build` / `test` / `verify` / `clean` | Maven lifecycle (verify = unit + integration + JaCoCo) |
 | `make ps` / `logs` / `topics` | Container status and memory, logs, Kafka topics |
+| `make otp` | Latest MOCK OTPs (auth-service log) |
+| `make env-upgrade` | Add new settings to an existing `.env` |
 | `make testcontainers-reuse` | Enable Testcontainers container reuse |
 | `make docker-prune` | Clean dangling images, containers and build cache |
 | `make e2e` | End-to-end scenario (Phase 8) |
@@ -108,7 +117,7 @@ the requests with the `local` environment.
 | redis | 256 MB |
 | kafka (KRaft, heap 512 MB) | 1 GB |
 | otel-lgtm | 1.5 GB |
-| each Spring Boot service (`-Xms128m -Xmx256m`, virtual threads) | 448 MB |
+| each Spring Boot service (`-Xms128m -Xmx256m`, virtual threads, measured RSS ~350–400 MB) | 512 MB |
 
 Use compose profiles (`infra`, `core`, `payments`, `extras`) to start only what you need.
 

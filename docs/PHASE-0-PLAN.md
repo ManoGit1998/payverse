@@ -147,7 +147,7 @@ controllers live only in `api`.
 | kafka | `apache/kafka:4.x` (KRaft, single node) | 1g (`KAFKA_HEAP_OPTS=-Xmx512m`) |
 | otel-lgtm | `grafana/otel-lgtm` | 1536m |
 | **Infra total** | | **~3.5 GB** |
-| each service | `eclipse-temurin:21-jre` (non-root, layered jar) | 448m (`-Xms128m -Xmx256m`; 384m measured too tight) |
+| each service | `eclipse-temurin:21-jre` (non-root, layered jar) | 512m (`-Xms128m -Xmx256m`, `MALLOC_ARENA_MAX=2`; measured RSS 345–400 MiB) |
 
 Profiles: `infra` (4 infra containers) · `core` (gateway, auth, user, wallet) · `payments`
 (transaction, payment, fraud, bill) · `extras` (rewards, notification, recon, admin).
@@ -385,6 +385,11 @@ the completed response is stored in Redis (24 h) **and** `idempotency_records` (
 | **8 Ops** | Grafana dashboards, k6 tests, K8s manifests + Helm, GitHub Actions (build, test, JaCoCo ≥80% gate, images), `make e2e` | `make e2e` passes end to end |
 
 Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical commits → summary + run/test steps → wait for "continue".
+
+## 9a. Changes made during implementation
+
+- Phase 2: KYC tier `NONE` added before `MIN_KYC`. Mobile lookup moved to auth-service (`/internal/auth/users/lookup`).
+  Client-credentials endpoint `POST /api/v1/auth/oauth/token` added. Docker Postgres on host port 5433.
 
 ## 10. Questions for you
 
