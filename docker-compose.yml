@@ -1,0 +1,169 @@
+# PayVerse local environment (OrbStack / Docker, linux/arm64).
+#
+# Profiles:   infra    → postgres, redis, kafka (+ topic init), otel-lgtm   (~3.5 GB)
+#             core     → api-gateway, auth, user, wallet
+#             payments → transaction, payment, fraud, bill
+#             extras   → rewards, notification, reconciliation, admin
+# Usage:      make infra-up            (or: docker compose --profile infra up -d)
+#             docker compose --profile infra --profile core up -d
+#
+# Every container has mem_limit; services run with -Xms128m -Xmx256m.
+
+name: payverse
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  mem_limit: 448m
+  env_file: .env
+  environment:
+    SPRING_PROFILES_ACTIVE: docker
+    JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+    REDIS_HOST: redis
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    POSTGRES_HOST: postgres
+    AUTH_SERVICE_URL: http://auth-service:8081
+    USER_SERVICE_URL: http://user-service:8082
+    WALLET_SERVICE_URL: http://wallet-service:8083
+    TRANSACTION_SERVICE_URL: http://transaction-service:8084
+    PAYMENT_SERVICE_URL: http://payment-service:8085
+    BILL_SERVICE_URL: http://bill-payment-service:8086
+    REWARDS_SERVICE_URL: http://rewards-service:8087
+    NOTIFICATION_SERVICE_URL: http://notification-service:8088
+    FRAUD_SERVICE_URL: http://fraud-risk-service:8089
+    RECON_SERVICE_URL: http://reconciliation-service:8090
+    ADMIN_SERVICE_URL: http://admin-service:8091
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------- infra
+  postgres:
+    image: postgres:17-alpine
+    profiles: [infra]
+    mem_limit: 768m
+    shm_size: 128m
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payverse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD:?set SERVICE_DB_PASSWORD in .env}
+    command: >
+      postgres -c shared_buffers=128MB -c work_mem=4MB -c maintenance_work_mem=64MB
+               -c max_connections=150 -c effective_cache_size=384MB
+    ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8.8-alpine
+    profiles: [infra]
+    mem_limit: 256m
+    restart: unless-stopped
+    # noeviction: idempotency keys, OTPs and locks must never be silently evicted
+    command: >
+      redis-server --maxmemory 200mb --maxmemory-policy noeviction --appendonly yes
+                   --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  kafka:
+    image: apache/kafka:4.3.1
+    profiles: [infra]
+    mem_limit: 1g
+    restart: unless-stopped
+    ports: ["9092:9092"]
+    environment:
+      CLUSTER_ID: payverse-local-kraft-01
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 15s
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    profiles: [infra]
+    mem_limit: 256m
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_HEAP_OPTS: "-Xmx128m"
+      KAFKA_BOOTSTRAP: kafka:29092
+    entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
+    volumes:
+      - ./infra/kafka/create-topics.sh:/scripts/create-topics.sh:ro
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    profiles: [infra]
+    mem_limit: 1536m
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Grafana (admin/admin)
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - lgtm-data:/data
+
+  # ---------------------------------------------------------------- core
+  api-gateway:
+    <<: *service-defaults
+    profiles: [core]
+    build:
+      context: ./services/api-gateway
+    image: payverse/api-gateway:local
+    ports: ["8080:8080"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # auth-service, user-service, wallet-service are added in Phases 2–3,
+  # payments/extras profiles in Phases 4–7.
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  lgtm-data:
