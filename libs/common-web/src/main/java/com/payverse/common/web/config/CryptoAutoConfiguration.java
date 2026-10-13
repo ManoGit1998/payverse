@@ -5,7 +5,7 @@ import com.payverse.common.web.crypto.EncryptedStringConverter;
 import com.payverse.common.web.crypto.FieldEncryptor;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -43,10 +43,11 @@ public class CryptoAutoConfiguration {
     @ConditionalOnClass(name = "jakarta.persistence.AttributeConverter")
     static class JpaConverterRegistration {
 
+        // ObjectProvider rather than @ConditionalOnBean: nested classes are evaluated before the
+        // outer class's @Bean methods are registered, so the condition would never match.
         @Bean
-        @ConditionalOnBean(FieldEncryptor.class)
-        InitializingBean encryptedStringConverterRegistrar(FieldEncryptor encryptor) {
-            return () -> EncryptedStringConverter.register(encryptor);
+        InitializingBean encryptedStringConverterRegistrar(ObjectProvider<FieldEncryptor> encryptor) {
+            return () -> encryptor.ifAvailable(EncryptedStringConverter::register);
         }
     }
 }
