@@ -1,0 +1,76 @@
+### PayVerse — wallet-service through the gateway. Run 01-auth.http steps 1–2 (sets {{accessToken}}),
+### set a PIN (01-auth.http step 5) and do min KYC (02-user.http) first: NONE-tier wallets can't move money.
+
+### My wallet: balance, status, KYC tier, limits and usage
+GET {{gateway}}/api/v1/wallets/me
+Authorization: Bearer {{accessToken}}
+
+### Add money (MOCK gateway; amounts ending in .13 are declined). Re-send with the same key → same response.
+POST {{gateway}}/api/v1/wallets/me/add-money
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 6c3a0d0e-0000-4000-8000-000000000001
+Content-Type: application/json
+
+{ "amount": 2500.50, "paymentMethod": "UPI" }
+
+### Add money that the MOCK gateway declines → 402 WALLET_PAYMENT_DECLINED
+POST {{gateway}}/api/v1/wallets/me/add-money
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+Content-Type: application/json
+
+{ "amount": 100.13, "paymentMethod": "CARD" }
+
+### Withdraw to a linked bank account (needs the transaction PIN; bankAccountId from 02-user.http)
+POST {{gateway}}/api/v1/wallets/me/withdraw
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "amount": 500.00, "bankAccountId": "{{bankAccountId}}" }
+
+### Ledger history (newest first, with running balance)
+GET {{gateway}}/api/v1/wallets/me/ledger?page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+### --- Internal saga API on wallet-service (port 8083, role SERVICE) — get {{serviceToken}} from 01-auth.http ---
+
+### Debit (TRANSFER → TRANSFER_SUSPENSE)
+POST {{wallet}}/internal/wallets/{{userId}}/debit
+Authorization: Bearer {{serviceToken}}
+Idempotency-Key: txn-0001:debit
+Content-Type: application/json
+
+{ "amount": 100.00, "purpose": "TRANSFER", "referenceType": "Transaction", "referenceId": "txn-0001" }
+
+### Credit (TRANSFER ← TRANSFER_SUSPENSE)
+POST {{wallet}}/internal/wallets/{{payeeUserId}}/credit
+Authorization: Bearer {{serviceToken}}
+Idempotency-Key: txn-0001:credit
+Content-Type: application/json
+
+{ "amount": 100.00, "purpose": "TRANSFER", "referenceType": "Transaction", "referenceId": "txn-0001" }
+
+### Reverse a journal (saga compensation)
+POST {{wallet}}/internal/wallets/{{userId}}/reverse
+Authorization: Bearer {{serviceToken}}
+Idempotency-Key: txn-0001:compensate
+Content-Type: application/json
+
+{ "journalId": "{{journalId}}", "reason": "credit failed" }
+
+### Freeze / unfreeze
+POST {{wallet}}/internal/wallets/{{userId}}/freeze
+Authorization: Bearer {{serviceToken}}
+Content-Type: application/json
+
+{ "reason": "fraud review" }
+
+###
+POST {{wallet}}/internal/wallets/{{userId}}/unfreeze
+Authorization: Bearer {{serviceToken}}
+
+### Ledger integrity report
+GET {{wallet}}/internal/wallets/integrity
+Authorization: Bearer {{serviceToken}}

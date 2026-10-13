@@ -395,6 +395,9 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
   `repository`, `service`, `security` + optional `exception`, `model`, `mapper`, `messaging`) instead of the hexagonal
   layout in §3. JPA entities carry state rules; `LayeredArchitectureRules` replaces the hexagonal ArchUnit rules.
 
+- Phase 3: tier NONE has zero wallet limits (KYC required to move money). Internal wallet APIs are addressed by
+  `userId` (one wallet per user). Freeze blocks debits and new credits; reversals still apply.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?

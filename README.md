@@ -4,7 +4,7 @@ A PhonePe-style digital wallet and payments platform: Java 21, Spring Boot 4.1 m
 PostgreSQL, Redis, Kafka (KRaft) and OpenTelemetry. **No real money moves.** Every external
 integration (UPI switch, payment gateway, billers, SMS/e-mail) is a clearly named mock.
 
-> Status: **Phase 2 — auth-service + user-service complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
+> Status: **Phase 3 — wallet-service (double-entry ledger) complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
 > [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full architecture, event catalog and DB schemas.
 
 ## Architecture
@@ -56,7 +56,7 @@ flowchart LR
 | `services/api-gateway` | Spring Cloud Gateway (WebFlux) | ✅ |
 | `services/auth-service` | OTP login, RS256 JWT + JWKS, refresh rotation, devices, Argon2 PIN | ✅ |
 | `services/user-service` | Profile, KYC tiers (mock), bank accounts, beneficiaries | ✅ |
-| wallet | Phase 3 | ⏳ |
+| `services/wallet-service` | Double-entry ledger, KYC limits, idempotent saga steps, freeze, concurrency-proven | ✅ |
 | transaction, payment | Phase 4 | ⏳ |
 | notification, rewards | Phase 5 | ⏳ |
 | bill-payment, fraud-risk | Phase 6 | ⏳ |
@@ -77,11 +77,13 @@ make infra-up            # Postgres, Redis, Kafka + topics, Grafana LGTM (~3.5 G
 make verify              # all unit + Testcontainers integration tests
 make run-auth-service    # :8081   (each in its own terminal)
 make run-user-service    # :8082
+make run-wallet-service  # :8083
 make run-api-gateway     # :8080
 make otp                 # read the MOCK OTP after requesting one
 ```
 
-Then open [http/01-auth.http](http/01-auth.http) and [http/02-user.http](http/02-user.http) in IntelliJ or
+Then open [http/01-auth.http](http/01-auth.http), [http/02-user.http](http/02-user.http) and
+[http/03-wallet.http](http/03-wallet.http) in IntelliJ or
 VS Code (REST Client) and run the requests with the `local` environment.
 
 > Postgres from Docker is published on **localhost:5433** (`POSTGRES_PORT`), because a native Postgres

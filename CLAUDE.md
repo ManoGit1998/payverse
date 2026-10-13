@@ -10,8 +10,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 0 | Plan: architecture, events, schemas, APIs | ✅ approved 2026-10-13 |
 | 1 | Parent POM, shared libs, api-gateway, docker-compose, Makefile | ✅ done 2026-10-13 |
 | 2 | auth-service + user-service | ✅ done 2026-10-14 |
-| 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ⏳ next |
-| 4 | transaction-service + payment-service (saga, UPI sim, QR) | |
+| 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ✅ done 2026-10-14 |
+| 4 | transaction-service + payment-service (saga, UPI sim, QR) | ⏳ next |
 | 5 | notification-service + rewards-service | |
 | 6 | bill-payment-service + fraud-risk-service | |
 | 7 | reconciliation-service + admin-service | |
@@ -57,9 +57,30 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - `@Transactional(noRollbackFor = PayverseException.class)` wherever a failed attempt must be persisted (PIN failures, refresh reuse revocation, KYC rejections).
 - Docker Postgres is published on host port **5433** (`POSTGRES_PORT`): the dev Mac runs a native PostgreSQL 18 on 5432.
 - Service containers: `mem_limit 512m`, `-Xmx256m`, capped metaspace / code cache / direct memory, `MALLOC_ARENA_MAX=2`
-  (measured RSS: gateway ~345 MiB, auth/user ~395 MiB).
+  (measured RSS: gateway ~345 MiB, auth/user ~395 MiB, wallet ~430 MiB).
 - JaCoCo `check` fails the build if any `com.payverse.*.service*`, `*.entity*` or `*.model*` package is under 80% line
   coverage (skipped automatically with `-DskipTests`).
+
+## Phase 3 decisions
+
+- Ledger: one LIABILITY account per wallet + fixed-id system accounts (`SystemAccount`). Postings are 2-entry journals;
+  balance materialised in `wallets.balance` + `ledger_entries.balance_after`. DB enforces balanced journals (deferred
+  trigger), append-only journals/entries, `balance >= 0`, unique idempotency keys, one reversal per journal.
+- `WalletPostingService` is the only ledger writer. Lock order: Redis wallet lock (bound to the transaction, released
+  afterCompletion) → read wallet → post. Only one user wallet per posting, so no deadlocks.
+- Saga contract for Phase 4: `POST /internal/wallets/{userId}/debit|credit|reverse` with `Idempotency-Key`
+  (`<txnId>:debit`, `<txnId>:credit`, `<txnId>:compensate`), purpose TRANSFER | BILL_PAYMENT | BILL_REFUND | CASHBACK.
+  Retries → 200 + `replayed:true`. Reversals bypass freezes and limits.
+- Tier NONE has zero limits (KYC required). Limits are configurable in `payverse.wallet.limits`, with periods in IST.
+- Add money uses `MockPaymentGatewayAdapter` inside wallet-service until payment-service takes over in Phase 4
+  (`.13` declines). Withdrawals use `MockPayoutAdapter` (`.14` fails, rollback).
+- Shared additions in common-web: `ServiceTokenProvider`/`ServiceTokenInterceptor` (client_credentials, cached),
+  `RemoteProblemHandler` (remote RFC 9457 → same code/status/extras; 5xx → `DOWNSTREAM_UNAVAILABLE`), `AuditLogger`
+  + `V0_3__audit_log.sql` (append-only trigger `payverse_reject_modification()`).
+- Service-to-service calls: `RestClient` (spring-boot-starter-restclient) + Spring Cloud CircuitBreaker (Resilience4j,
+  3s time limit, only 5xx/IO failures count). PIN verification is never retried (attempts count toward lockout).
+- Flyway `out-of-order: true` in every service, because shared `db/common` migrations can be added after a service's V1.
+- Hibernate: map `CHAR(n)` columns with `@JdbcTypeCode(SqlTypes.CHAR)` (schema validation is on).
 
 ## Conventions
 
@@ -132,7 +153,9 @@ Grafana: http://localhost:3000 (admin/admin). Gateway: http://localhost:8080.
   trusted `X-Forwarded-For` handling (Phase 8, K8s ingress).
 - Gateway image is ~630 MB (Ubuntu JRE). Switching to a smaller base is an option for Phase 8.
 - `make e2e` intentionally fails until Phase 8.
-- Audit log (`audit_log` with an append-only trigger) arrives with the first financial action (Phase 3).
 - Access tokens stay valid until expiry (15m) after logout or device revocation; there is no deny-list yet.
 - No penny-drop / name-match verification when linking bank accounts (simulation).
 - `SigningKeyService.rotate()` exists but has no admin endpoint yet (admin-service, Phase 7).
+- Add money charges the mock gateway inside the request; if the commit failed after a successful charge, recon must
+  refund it (Phase 7). Payouts are synchronous in the mock; a real adapter should go through the outbox.
+- Reversing a debit does not give back daily-limit usage (conservative).
