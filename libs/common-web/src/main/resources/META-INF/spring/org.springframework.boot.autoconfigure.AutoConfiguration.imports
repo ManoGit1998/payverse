@@ -2,3 +2,4 @@ com.payverse.common.web.config.WebCommonsAutoConfiguration
 com.payverse.common.web.config.CryptoAutoConfiguration
 com.payverse.common.web.idempotency.IdempotencyAutoConfiguration
 com.payverse.common.web.observability.ObservabilityAutoConfiguration
+com.payverse.common.web.config.ServiceClientAutoConfiguration
