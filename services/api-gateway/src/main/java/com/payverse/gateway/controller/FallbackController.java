@@ -1,4 +1,4 @@
-package com.payverse.gateway.api;
+package com.payverse.gateway.controller;
 
 import com.payverse.gateway.filter.ProblemResponses;
 import org.springframework.http.HttpStatus;
