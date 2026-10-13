@@ -4,7 +4,8 @@ SHELL := /bin/bash
 
 MVN        := ./mvnw -B
 COMPOSE    := docker compose
-JVM_ARGS   := -Xms128m -Xmx256m -XX:+UseSerialGC
+JVM_ARGS   := -Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC
+export MALLOC_ARENA_MAX := 2
 SERVICES   := api-gateway auth-service user-service wallet-service transaction-service payment-service \
               bill-payment-service rewards-service notification-service fraud-risk-service \
               reconciliation-service admin-service
@@ -27,6 +28,7 @@ env: ## Create .env from .env.example with freshly generated secrets
 	sed -i '' "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 16)|" .env; \
 	sed -i '' "s|^SERVICE_DB_PASSWORD=.*|SERVICE_DB_PASSWORD=$$(openssl rand -hex 16)|" .env; \
 	sed -i '' "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=$$(openssl rand -hex 16)|" .env; \
+	sed -i '' "s|^SERVICE_CLIENT_SECRET=.*|SERVICE_CLIENT_SECRET=$$(openssl rand -hex 24)|" .env; \
 	sed -i '' "s|^PAYVERSE_CRYPTO_ENCRYPTION_KEY=.*|PAYVERSE_CRYPTO_ENCRYPTION_KEY=$$(openssl rand -base64 32)|" .env; \
 	sed -i '' "s|^PAYVERSE_CRYPTO_BLIND_INDEX_KEY=.*|PAYVERSE_CRYPTO_BLIND_INDEX_KEY=$$(openssl rand -base64 32)|" .env; \
 	echo "Created .env with random secrets"
@@ -41,7 +43,7 @@ testcontainers-reuse: ## Enable Testcontainers container reuse (~/.testcontainer
 .PHONY: infra-up
 infra-up: env ## Start Postgres, Redis, Kafka (KRaft) + topics, Grafana LGTM
 	$(COMPOSE) --profile infra up -d
-	@echo "Grafana: http://localhost:3000 (admin/admin) | Postgres :5432 | Redis :6379 | Kafka :9092"
+	@echo "Grafana: http://localhost:3000 (admin/admin) | Postgres :$${POSTGRES_PORT:-5433} | Redis :6379 | Kafka :9092"
 
 .PHONY: infra-down
 infra-down: ## Stop infra containers (data volumes are kept)
@@ -63,6 +65,20 @@ ps: ## Show running containers and memory usage
 .PHONY: logs
 logs: ## Tail logs of all compose containers
 	$(COMPOSE) logs -f --tail=100
+
+.PHONY: env-upgrade
+env-upgrade: ## Append settings added in later phases to an existing .env (never overwrites)
+	@for key in $$(grep -oE '^[A-Z_]+=' .env.example | tr -d '='); do \
+		if ! grep -q "^$$key=" .env; then \
+			line=$$(grep "^$$key=" .env.example); \
+			if [ "$$key" = "SERVICE_CLIENT_SECRET" ]; then line="SERVICE_CLIENT_SECRET=$$(openssl rand -hex 24)"; fi; \
+			echo "$$line" >> .env; echo "added $$key"; \
+		fi; \
+	done
+
+.PHONY: otp
+otp: ## Show the latest MOCK OTPs from auth-service logs (Docker or local run log)
+	@{ docker logs payverse-auth-service-1 2>/dev/null; cat .run/auth-service.log 2>/dev/null; } | grep -o '\[MOCK SMS\][^"]*' | tail -5
 
 .PHONY: topics
 topics: ## List Kafka topics
@@ -90,7 +106,8 @@ clean: ## Remove build output
 run-%: ## Run a service from source against the infra containers (e.g. make run-api-gateway)
 	@if [ ! -d services/$* ]; then echo "Unknown service '$*'. Available: $$(ls services | tr '\n' ' ')"; exit 1; fi
 	$(MVN) -q -pl services/$* -am -DskipTests install
-	$(MVN) -pl services/$* spring-boot:run -Dspring-boot.run.jvmArguments="$(JVM_ARGS)"
+	@mkdir -p .run
+	$(MVN) -pl services/$* spring-boot:run -Dspring-boot.run.jvmArguments="$(JVM_ARGS)" 2>&1 | tee .run/$*.log
 
 # ------------------------------------------------------------------ housekeeping
 .PHONY: docker-prune

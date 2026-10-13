@@ -7,21 +7,23 @@
 # Usage:      make infra-up            (or: docker compose --profile infra up -d)
 #             docker compose --profile infra --profile core up -d
 #
-# Every container has mem_limit; services run with -Xms128m -Xmx256m.
+# Every container has mem_limit; services run with -Xms128m -Xmx256m (+ capped metaspace/code cache/direct memory).
 
 name: payverse
 
 x-service-defaults: &service-defaults
   restart: unless-stopped
-  mem_limit: 448m
+  mem_limit: 512m
   env_file: .env
   environment:
     SPRING_PROFILES_ACTIVE: docker
-    JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+    JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+    MALLOC_ARENA_MAX: "2"   # limits glibc native-memory fragmentation in JVMs
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
     REDIS_HOST: redis
     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
     AUTH_SERVICE_URL: http://auth-service:8081
     USER_SERVICE_URL: http://user-service:8082
     WALLET_SERVICE_URL: http://wallet-service:8083
@@ -57,7 +59,8 @@ services:
     command: >
       postgres -c shared_buffers=128MB -c work_mem=4MB -c maintenance_work_mem=64MB
                -c max_connections=150 -c effective_cache_size=384MB
-    ports: ["5432:5432"]
+    # host port 5433 by default: a native Postgres often already owns 5432 on macOS
+    ports: ["${POSTGRES_PORT:-5433}:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -159,8 +162,23 @@ services:
       redis:
         condition: service_healthy
 
-  # auth-service, user-service, wallet-service are added in Phases 2–3,
-  # payments/extras profiles in Phases 4–7.
+  auth-service:
+    <<: *service-defaults
+    profiles: [core]
+    build:
+      context: ./services/auth-service
+    image: payverse/auth-service:local
+    ports: ["8081:8081"]
+
+  user-service:
+    <<: *service-defaults
+    profiles: [core]
+    build:
+      context: ./services/user-service
+    image: payverse/user-service:local
+    ports: ["8082:8082"]
+
+  # wallet-service is added in Phase 3, payments/extras profiles in Phases 4–7.
 
 volumes:
   postgres-data:
