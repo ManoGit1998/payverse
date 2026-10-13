@@ -1,0 +1,121 @@
+# PayVerse
+
+A PhonePe-style digital wallet and payments platform: Java 21, Spring Boot 4.1 microservices,
+PostgreSQL, Redis, Kafka (KRaft) and OpenTelemetry. **No real money moves.** Every external
+integration (UPI switch, payment gateway, billers, SMS/e-mail) is a clearly named mock.
+
+> Status: **Phase 1 — Foundation complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
+> [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full architecture, event catalog and DB schemas.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    client[Mobile / Web / .http files] --> gw[api-gateway :8080<br/>JWT · rate limit · CORS · correlation ID]
+
+    gw --> auth[auth-service :8081]
+    gw --> user[user-service :8082]
+    gw --> wallet[wallet-service :8083]
+    gw --> txn[transaction-service :8084]
+    gw --> pay[payment-service :8085]
+    gw --> bill[bill-payment-service :8086]
+    gw --> rew[rewards-service :8087]
+    gw --> admin[admin-service :8091]
+
+    auth -. JWKS .-> gw
+    txn -- saga REST --> wallet
+    txn -- risk check --> fraud[fraud-risk-service :8089]
+    txn -- VPA / QR --> pay
+    bill -- debit --> wallet
+    pay -- credit --> wallet
+
+    subgraph bus[Kafka · transactional outbox → topics]
+    end
+    auth & user & wallet & txn & pay & bill & rew & fraud & admin --> bus
+    bus --> notif[notification-service :8088]
+    bus --> rew
+    bus --> fraud
+    bus --> recon[reconciliation-service :8090]
+
+    subgraph infra[Infra]
+      pg[(PostgreSQL 17<br/>DB per service)]
+      redis[(Redis 8)]
+      lgtm[Grafana otel-lgtm]
+    end
+```
+
+| Module | Purpose | Status |
+|---|---|---|
+| `libs/common-money` | `Money` value object (BigDecimal, scale 2, HALF_EVEN, INR) | ✅ |
+| `libs/common-error` | Error codes, `PayverseException`, RFC 9457 handler | ✅ |
+| `libs/common-events` | Event envelope, topic catalog, payload records | ✅ |
+| `libs/common-security` | JWT resource server, roles, `AuthenticatedUser` | ✅ |
+| `libs/common-web` | Correlation IDs, Idempotency-Key, PII masking, AES-GCM encryption, JSON logs | ✅ |
+| `libs/common-outbox` | Transactional outbox relay, idempotent consumers, DLT | ✅ |
+| `libs/common-test` | Reusable Testcontainers, test JWTs, ArchUnit rules | ✅ |
+| `services/api-gateway` | Spring Cloud Gateway (WebFlux) | ✅ |
+| auth, user | Phase 2 | ⏳ |
+| wallet | Phase 3 | ⏳ |
+| transaction, payment | Phase 4 | ⏳ |
+| notification, rewards | Phase 5 | ⏳ |
+| bill-payment, fraud-risk | Phase 6 | ⏳ |
+| reconciliation, admin | Phase 7 | ⏳ |
+
+## Prerequisites
+
+- macOS on Apple Silicon (any arm64/amd64 machine works), 16 GB RAM
+- JDK 21+ (the build targets Java 21; JDK 25 works)
+- [OrbStack](https://orbstack.dev) or Docker Desktop
+- No local Maven needed (`./mvnw` is included)
+
+## Quick start
+
+```bash
+make env                 # .env with random secrets (git-ignored)
+make infra-up            # Postgres, Redis, Kafka + topics, Grafana LGTM (~3.5 GB limit)
+make verify              # all unit + Testcontainers integration tests
+make run-api-gateway     # gateway on http://localhost:8080
+```
+
+Then open [http/00-gateway.http](http/00-gateway.http) in IntelliJ or VS Code (REST Client) and run
+the requests with the `local` environment.
+
+| URL | What |
+|---|---|
+| http://localhost:8080/actuator/health | Gateway health |
+| http://localhost:8080/swagger-ui.html | Aggregated Swagger UI (services appear as they are built) |
+| http://localhost:3000 | Grafana (admin / admin): Explore → Tempo (traces), Loki (logs), Prometheus (metrics) |
+
+## Make targets
+
+| Target | Description |
+|---|---|
+| `make env` | Create `.env` from `.env.example` with generated secrets |
+| `make infra-up` / `infra-down` / `infra-reset` | Start / stop / stop and wipe infra |
+| `make run-<service>` | Run a service from source, e.g. `make run-api-gateway` |
+| `make up-core` | Build jars + run infra and core services in Docker |
+| `make build` / `test` / `verify` / `clean` | Maven lifecycle (verify = unit + integration + JaCoCo) |
+| `make ps` / `logs` / `topics` | Container status and memory, logs, Kafka topics |
+| `make testcontainers-reuse` | Enable Testcontainers container reuse |
+| `make docker-prune` | Clean dangling images, containers and build cache |
+| `make e2e` | End-to-end scenario (Phase 8) |
+
+## Memory budget (16 GB laptop)
+
+| Container | Limit |
+|---|---|
+| postgres | 768 MB |
+| redis | 256 MB |
+| kafka (KRaft, heap 512 MB) | 1 GB |
+| otel-lgtm | 1.5 GB |
+| each Spring Boot service (`-Xms128m -Xmx256m`, virtual threads) | 448 MB |
+
+Use compose profiles (`infra`, `core`, `payments`, `extras`) to start only what you need.
+
+## Conventions
+
+- Money is always `Money` / `BigDecimal`. Never `double`.
+- Every write that moves money requires an `Idempotency-Key` header.
+- Events are written via the transactional outbox; consumers de-duplicate on `eventId`.
+- Errors are RFC 9457 Problem Details with a stable `code` and the request's `correlationId`.
+- Hexagonal packages per service (`api`, `application`, `domain`, `infrastructure`), enforced by ArchUnit.
