@@ -52,21 +52,39 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - Signing keys are in `auth_db.signing_keys` with the private key encrypted. auth-service validates its own tokens from that key store; every other service uses the JWKS URL.
 - Service-to-service: `POST /api/v1/auth/oauth/token` (client_credentials) issues role `SERVICE`. Dev uses one shared `SERVICE_CLIENT_SECRET`.
 - Mobile → userId resolution is owned by auth (`/internal/auth/users/lookup`); user-service stores only the masked mobile.
-- user-service aggregates are immutable **records** (`with…` methods), so MapStruct maps them to API responses. auth-service
-  domain classes are mutable (fluent accessors), so its DTOs use static factories.
+- (Superseded on 2026-10-14 by the layered restructure: entities are JPA classes with Lombok getters; MapStruct maps them.)
 - Mocks: `LogOtpSender` (OTP in logs, `make otp`), `MockKycVerifier` (rejects numbers containing `9999`), `MockDocumentStorage` (discards bytes).
 - `@Transactional(noRollbackFor = PayverseException.class)` wherever a failed attempt must be persisted (PIN failures, refresh reuse revocation, KYC rejections).
 - Docker Postgres is published on host port **5433** (`POSTGRES_PORT`): the dev Mac runs a native PostgreSQL 18 on 5432.
 - Service containers: `mem_limit 512m`, `-Xmx256m`, capped metaspace / code cache / direct memory, `MALLOC_ARENA_MAX=2`
   (measured RSS: gateway ~345 MiB, auth/user ~395 MiB).
-- JaCoCo `check` fails the build if any `com.payverse.*.domain*` / `*.application*` package is under 80% line coverage.
+- JaCoCo `check` fails the build if any `com.payverse.*.service*`, `*.entity*` or `*.model*` package is under 80% line
+  coverage (skipped automatically with `-DskipTests`).
 
 ## Conventions
 
-- Packages: `com.payverse.<service>.{api,application,domain,infrastructure}`. `domain` may depend only on
-  the JDK, itself, `com.payverse.common.money` and `com.payverse.common.error` (base package). JPA entities
-  live in `infrastructure.persistence` and are mapped to domain objects. Every service adds an
-  `ArchitectureTest` using `HexagonalArchitectureRules` (see `libs/common-test`).
+- **Package layout (layered, requested by the user on 2026-10-14 — replaces the hexagonal layout of the brief):**
+  ```
+  com.payverse.<service>
+  ├── config      @Configuration, @ConfigurationProperties, Clock
+  ├── controller  @RestController (public /api/v1/** and /internal/**)
+  ├── dto         request/response records (one per file)
+  ├── entity      JPA entities (Lombok @Getter) + their enums; hold state and state rules (e.g. PIN lockout)
+  ├── repository  Spring Data repositories and Redis stores
+  ├── service     business logic + @Transactional; mock provider adapters (Mock*/Log*) live here too
+  ├── security    token/key/hashing components (auth-service)
+  └── optional    exception (ErrorCode enum), model (non-persisted value objects), mapper (MapStruct),
+                  messaging (Kafka listeners), client (REST clients to other services)
+  ```
+  Enforced by `LayeredArchitectureRules` (common-test): controllers don't touch repositories, services don't
+  depend on controllers, repositories don't depend on services/controllers/DTOs, entities don't depend on
+  services/repositories/controllers/DTOs/Spring stereotypes, DTOs don't depend on services/repositories, no
+  field injection. Every service has an `ArchitectureTest`.
+- Entities: `@Getter` + `@NoArgsConstructor(access = PROTECTED)`, static factories (`User.register(...)`), intention-
+  revealing mutators (`pin.recordAttempt(...)`, `account.remove(now)`), no public setters except where a flag is
+  genuinely free (`BankAccount.setPrimary`). Encrypted columns use `@Convert(converter = EncryptedStringConverter.class)`;
+  blind indexes are computed via an `UnaryOperator<String>` passed in from the service (`blindIndexer::index`).
+- Mapping: MapStruct mappers in `mapper` (entity → DTO); small services may use static `Dto.of(entity)` factories.
 - Money: `Money` only (never double/float); DB `NUMERIC(19,2)` + `CHAR(3)` currency; wire format is a string `"100.00"`.
 - Errors: throw `PayverseException(ErrorCode, detail)`. Each service gets its own `ErrorCode` enum with codes
   prefixed by the service, e.g. `WALLET_INSUFFICIENT_BALANCE`.
@@ -91,8 +109,8 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   owned by role `<prefix>_svc` with password `SERVICE_DB_PASSWORD`.
 - New service checklist: module in the root `pom.xml`, `Dockerfile` (copy the gateway's), compose entry under the
   right profile using `<<: *service-defaults`, `application.yml` (virtual threads, graceful shutdown, probes,
-  OTLP, structured logs; copy the gateway's management/logging blocks), `README.md`, `http/NN-<service>.http`,
-  `ArchitectureTest`, and an IT.
+  OTLP, structured logs; copy auth-service's), the layered packages above, `README.md`, `http/NN-<service>.http`,
+  `ArchitectureTest` (copy auth-service's), unit tests for entities/services and a Testcontainers `*IT`.
 
 ## Commands
 

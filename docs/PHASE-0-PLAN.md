@@ -391,6 +391,10 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
 - Phase 2: KYC tier `NONE` added before `MIN_KYC`. Mobile lookup moved to auth-service (`/internal/auth/users/lookup`).
   Client-credentials endpoint `POST /api/v1/auth/oauth/token` added. Docker Postgres on host port 5433.
 
+- 2026-10-14 (user request): services use a **layered** package layout (`config`, `controller`, `dto`, `entity`,
+  `repository`, `service`, `security` + optional `exception`, `model`, `mapper`, `messaging`) instead of the hexagonal
+  layout in §3. JPA entities carry state rules; `LayeredArchitectureRules` replaces the hexagonal ArchUnit rules.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?
