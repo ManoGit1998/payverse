@@ -17,6 +17,22 @@ Identity and credentials for PayVerse. Port **8081**, database `auth_db`.
 | Admin roles | Mobiles in `ADMIN_MOBILES` / `SUPPORT_MOBILES` get those roles at login (local seeding instead of Keycloak) |
 | PII | Mobile numbers are encrypted at rest. Lookups go through an HMAC blind index. Events and logs carry only `******1234` |
 
+## Package structure
+
+```
+com.payverse.auth
+├── config      AuthConfig (Clock), AuthProperties
+├── controller  AuthController, ServiceTokenController, InternalAuthController, JwksController
+├── dto         request/response records (OtpRequest, TokenResponse, …)
+├── entity      User, Device, RefreshToken, TransactionPin, SigningKey + enums
+├── repository  Spring Data repositories, OtpRepository + RateLimitRepository (Redis)
+├── service     OtpService, LoginService, TokenService, PinService, DeviceService, ServiceClientService,
+│               UserLookupService, AuthEventPublisher, OtpSender + LogOtpSender (MOCK)
+├── security    JwtTokenProvider, SigningKeyService, PinEncoder (Argon2id), SecureTokens, SecurityConfig
+├── exception   AuthErrorCode
+└── model       MobileNumber, DeviceId, Pin, OtpChallenge, OtpPurpose, PinVerification
+```
+
 ## API
 
 | Method | Path | Auth |
