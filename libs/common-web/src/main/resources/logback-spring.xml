@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shared PayVerse logging config (provided by common-web).
+  CONSOLE: Spring Boot structured JSON (logging.structured.format.console, default logstash) with
+           PII scrubbing via logging.structured.json.customizer. Activate profile `plainlog` for
+           human-readable local output.
+  OTEL:    exports logs via OTLP; connected to the SDK by ObservabilityAutoConfiguration.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProperty name="PAYVERSE_LOG_FORMAT" source="logging.structured.format.console" defaultValue="logstash"/>
+
+    <springProfile name="plainlog">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    </springProfile>
+    <springProfile name="!plainlog">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>${CONSOLE_LOG_THRESHOLD}</level>
+            </filter>
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>${PAYVERSE_LOG_FORMAT}</format>
+                <charset>${CONSOLE_LOG_CHARSET}</charset>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+        <captureMdcAttributes>*</captureMdcAttributes>
+        <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+        <captureExperimentalAttributes>true</captureExperimentalAttributes>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="OTEL"/>
+    </root>
+</configuration>
