@@ -14,6 +14,23 @@ Profiles, KYC tiers, linked bank accounts and saved beneficiaries. Port **8082**
 | Bank accounts | Up to 5, unique per user. The first becomes primary; removing the primary promotes the next. Numbers are AES-GCM encrypted at rest, deduplicated via a blind index, and only ever returned masked (`XXXXXXXX9012`). Publishes `user.bank-account-linked` |
 | Beneficiaries | Up to 50 saved payees: `MOBILE`, `VPA` or `BANK_ACCOUNT` + IFSC. Values are encrypted and returned masked |
 
+## Package structure
+
+```
+com.payverse.user
+├── config      UserConfig (Clock)
+├── controller  ProfileController, KycController, BankAccountController, BeneficiaryController, InternalUserController
+├── dto         request/response records
+├── entity      UserProfile, KycRecord, BankAccount, Beneficiary + enums (KycTier, IdDocumentType, …)
+├── repository  Spring Data repositories
+├── service     ProfileService, KycService, BankAccountService, BeneficiaryService, UserEventPublisher,
+│               KycVerifier + MockKycVerifier, DocumentStorage + MockDocumentStorage
+├── mapper      UserMapper (MapStruct entity → DTO)
+├── messaging   UserRegisteredListener (Kafka)
+├── exception   UserErrorCode
+└── model       IdDocument, Verhoeff
+```
+
 ## API
 
 | Method | Path | Auth |
