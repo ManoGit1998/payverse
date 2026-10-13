@@ -178,7 +178,15 @@ services:
     image: payverse/user-service:local
     ports: ["8082:8082"]
 
-  # wallet-service is added in Phase 3, payments/extras profiles in Phases 4–7.
+  wallet-service:
+    <<: *service-defaults
+    profiles: [core]
+    build:
+      context: ./services/wallet-service
+    image: payverse/wallet-service:local
+    ports: ["8083:8083"]
+
+  # payments/extras profiles are added in Phases 4–7.
 
 volumes:
   postgres-data:

@@ -24,6 +24,8 @@ spring:
       ddl-auto: validate
   flyway:
     locations: classpath:db/migration,classpath:db/common
+    # shared db/common migrations (idempotent) may be added after a service's own V1+
+    out-of-order: true
   servlet:
     multipart:
       max-file-size: 5MB
