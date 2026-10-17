@@ -32,6 +32,7 @@ public final class Topics {
     public static final String BILL_MANDATE_EXECUTED = "payverse.bill.mandate-executed.v1";
 
     public static final String REWARDS_CASHBACK_GRANTED = "payverse.rewards.cashback-granted.v1";
+    public static final String REWARDS_SCRATCH_CARD_ISSUED = "payverse.rewards.scratch-card-issued.v1";
 
     public static final String FRAUD_TRANSACTION_FLAGGED = "payverse.fraud.transaction-flagged.v1";
 

@@ -46,6 +46,7 @@ public enum EventType {
     MANDATE_EXECUTED("bill.mandate-executed", Topics.BILL_MANDATE_EXECUTED, "Mandate", BillEvents.MandateExecuted.class),
 
     CASHBACK_GRANTED("rewards.cashback-granted", Topics.REWARDS_CASHBACK_GRANTED, "Reward", RewardsEvents.CashbackGranted.class),
+    SCRATCH_CARD_ISSUED("rewards.scratch-card-issued", Topics.REWARDS_SCRATCH_CARD_ISSUED, "ScratchCard", RewardsEvents.ScratchCardIssued.class),
 
     TRANSACTION_FLAGGED("fraud.transaction-flagged", Topics.FRAUD_TRANSACTION_FLAGGED, "RiskAssessment", FraudEvents.TransactionFlagged.class),
 

@@ -32,6 +32,7 @@ TOPICS=(
   payverse.bill.payment-failed.v1
   payverse.bill.mandate-executed.v1
   payverse.rewards.cashback-granted.v1
+  payverse.rewards.scratch-card-issued.v1
   payverse.fraud.transaction-flagged.v1
   payverse.admin.refund-approved.v1
   payverse.recon.mismatch-detected.v1
