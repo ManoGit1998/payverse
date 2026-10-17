@@ -13,11 +13,11 @@ name: payverse
 
 x-service-defaults: &service-defaults
   restart: unless-stopped
-  mem_limit: 512m
+  mem_limit: 640m
   env_file: .env
   environment:
     SPRING_PROFILES_ACTIVE: docker
-    JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+    JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
     MALLOC_ARENA_MAX: "2"   # limits glibc native-memory fragmentation in JVMs
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
     REDIS_HOST: redis
