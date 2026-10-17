@@ -15,7 +15,7 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 5 | notification-service + rewards-service | ✅ done 2026-10-17 |
 | 6 | bill-payment-service + fraud-risk-service | ✅ done 2026-10-17 |
 | 7 | reconciliation-service + admin-service | ✅ done 2026-10-17 |
-| 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | ⏳ next |
+| 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | ✅ done 2026-10-17 |
 
 Workflow per phase: build → `./mvnw verify` green → update this file → small commits → summarize
 with run/test steps → wait for the user to say "continue".
@@ -175,6 +175,29 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   and lost the referral bonus. Fix: `kyc_qualified_users` (rewards V2) remembers qualification; a referral created
   later pays out at once. Any consumer joining two topics needs this kind of "remember and reconcile" state.
 
+## Phase 8 decisions
+
+- Business metrics without touching business code: `OutboxPublisher` counts each event after commit (`payverse.events`
+  + `payverse.events.amount` for payloads with an `amount`), plus outbox backlog/age gauges; fraud and notification add
+  `payverse.risk.decisions|rule.hits` and `payverse.notifications`. **Counters are registered at 0 on startup**: with OTLP
+  push the first export already contains the first increments, which Prometheus `increase()` cannot see.
+- Dashboards are generated (`infra/grafana/build_dashboards.py` → `infra/grafana/dashboards` + a copy in the chart);
+  mounted into otel-lgtm via `/otel-lgtm/grafana/conf/provisioning/dashboards/payverse.yaml`. CI fails if out of date.
+- Images: `eclipse-temurin:21-jre-alpine` (gateway 434 MB, services ~510 MB) with a busybox-`wget` HEALTHCHECK on
+  `/actuator/health/readiness`, so `docker compose up --wait` means ready.
+- Memory: Spring MVC services use 140–157 MiB metaspace — the old 160m cap killed wallet under load. Now
+  `MaxMetaspaceSize=224m`, container limit 640m (compose) / heap = 40% of the limit (Helm). auth peaks ~550 MiB (Argon2).
+- `make e2e`: whole stack in Docker (`up --build --wait`), scenario in `e2e/e2e.py` (OTPs from `docker logs`); it checks
+  balances three ways (arithmetic incl. cashback, each wallet's ledger sum, integrity report). It refuses to run while
+  `make run-*` services hold the ports. Clients must handle the gateway's 429 on OTP/PIN (5/min/IP): the scripts wait.
+- `docker compose logs <svc>` fails for services outside the active profiles ("no such service: kafka"); use `docker logs`.
+- k6 runs in Docker (`grafana/k6:1.2.3`, `host.docker.internal`); users are seeded through auth-service directly.
+- Helm: one chart, a generic per-service template from `values.services`; secrets generated once (`lookup` +
+  `resource-policy: keep`) or `existingSecret`; gateway `SERVER_FORWARD_HEADERS_STRATEGY=framework` (ingress must
+  overwrite `X-Forwarded-For`). `deploy/k8s` is rendered with an existing Secret (never commit generated keys).
+  Tools run from Docker images (helm, kubeconform, actionlint) — none installed locally.
+- `make env` uses `sed -i.bak` (works with BSD and GNU sed; CI is Linux).
+
 ## Conventions
 
 - **Package layout (layered, requested by the user on 2026-10-14 — replaces the hexagonal layout of the brief):**
@@ -241,7 +264,10 @@ make env && make infra-up        # infra (Postgres, Redis, Kafka + topics, Grafa
 ./mvnw verify                    # everything (needs Docker); `make test` = unit only
 make run-api-gateway             # run a service from source (loads .env, logs to .run/<service>.log)
 make otp                         # latest MOCK OTPs from the auth-service log
-make smoke                       # live end-to-end scenario (all services + gateway running; Phase 5 part needs rewards + notification)
+make smoke                       # long live scenario, all phases (services from source via make run-*)
+make e2e                         # whole stack in Docker + the brief's end-to-end scenario
+make load                        # k6 load test against a running stack
+make helm-lint                   # Helm chart lint + kubeconform (Docker)
 make env-upgrade                 # add settings introduced by later phases to an existing .env
 make build && docker compose --profile infra --profile core --profile payments --profile extras up -d   # services in Docker
 make ps                          # containers + memory
@@ -251,10 +277,9 @@ Grafana: http://localhost:3000 (admin/admin). Gateway: http://localhost:8080.
 
 ## Known limitations and TODO
 
-- Gateway rate limiting keys anonymous clients on the remote address. Behind a load balancer, configure
-  trusted `X-Forwarded-For` handling (Phase 8, K8s ingress).
-- Gateway image is ~630 MB (Ubuntu JRE). Switching to a smaller base is an option for Phase 8.
-- `make e2e` intentionally fails until Phase 8.
+- The Helm chart is validated (lint + kubeconform) but has not been deployed to a live cluster in this repo's checks.
+- The gateway's 429 responses carry no `Retry-After` header (clients back off on their own).
+- Dev infra in the chart is single-node (no HA, no backups); production must use managed Postgres/Redis/Kafka.
 - Access tokens stay valid until expiry (15m) after logout or device revocation; there is no deny-list yet.
 - No penny-drop / name-match verification when linking bank accounts (simulation).
 - Refunds are full refunds only; reversing a refund does not give back daily-limit usage.

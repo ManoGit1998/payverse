@@ -422,6 +422,10 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
   TRANSFERS_VS_UPI and WALLET_INTEGRITY. Users raise disputes at `/api/v1/disputes` (admin-service). Audit queries read
   admin-service's own `audit_log`.
 
+- Phase 8: dashboards are generated from a script (not hand-edited JSON) and fed by outbox-derived business
+  metrics; images moved to the Alpine JRE; `deploy/k8s` is rendered from the Helm chart rather than maintained
+  separately; the e2e job runs nightly / on demand (not on every PR) because it needs the whole stack.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?

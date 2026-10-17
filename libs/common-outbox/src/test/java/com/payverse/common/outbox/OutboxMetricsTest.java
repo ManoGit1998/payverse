@@ -36,7 +36,9 @@ class OutboxMetricsTest {
         assertThat(registry.get("payverse.events").tag("event_type", "wallet.money-added").counter().count()).isEqualTo(2);
         assertThat(registry.get("payverse.events").tag("event_type", "auth.user-registered").counter().count()).isEqualTo(1);
         assertThat(registry.get("payverse.events.amount").tag("event_type", "wallet.money-added").summary().totalAmount()).isEqualTo(301.0);
-        assertThat(registry.find("payverse.events.amount").tag("event_type", "auth.user-registered").summary()).isNull();
+        assertThat(registry.get("payverse.events.amount").tag("event_type", "auth.user-registered").summary().count()).isZero();
+        // every event type starts at 0 so Prometheus increase() sees the first event too
+        assertThat(registry.get("payverse.events").tag("event_type", "bill.payment-completed").counter().count()).isZero();
         assertThat(metrics.amount("not a record")).isEmpty();
     }
 
