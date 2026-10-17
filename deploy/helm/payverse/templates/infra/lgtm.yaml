@@ -1,0 +1,63 @@
+{{- if and .Values.infra.enabled .Values.infra.lgtm.enabled }}
+{{- $fullname := include "payverse.fullname" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-dashboards
+  labels: {{- include "payverse.labels" . | nindent 4 }}
+data:
+  payverse.yaml: |
+    apiVersion: 1
+    providers:
+      - name: PayVerse
+        folder: PayVerse
+        type: file
+        options: { path: /otel-lgtm/payverse-dashboards }
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-lgtm
+  labels: {{- include "payverse.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/name: lgtm }
+  ports:
+    - { name: grafana, port: 3000 }
+    - { name: otlp-grpc, port: 4317 }
+    - { name: otlp-http, port: 4318 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-lgtm
+  labels: {{- include "payverse.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/name: lgtm }
+  template:
+    metadata:
+      labels:
+        {{- include "payverse.labels" . | nindent 8 }}
+        app.kubernetes.io/name: lgtm
+    spec:
+      containers:
+        - name: lgtm
+          image: {{ .Values.infra.lgtm.image }}
+          ports:
+            - { name: grafana, containerPort: 3000 }
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1536Mi } }
+          volumeMounts:
+            - { name: dashboards, mountPath: /otel-lgtm/payverse-dashboards }
+            - { name: dashboards, mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/payverse.yaml, subPath: payverse.yaml }
+      volumes:
+        - name: dashboards
+          configMap: { name: {{ $fullname }}-dashboards }
+{{- end }}

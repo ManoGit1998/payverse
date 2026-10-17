@@ -1,0 +1,42 @@
+{{- $root := . -}}
+{{- $fullname := include "payverse.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-config
+  labels: {{- include "payverse.labels" . | nindent 4 }}
+data:
+  {{- if .Values.infra.enabled }}
+  POSTGRES_HOST: {{ $fullname }}-postgres
+  POSTGRES_PORT: "5432"
+  REDIS_HOST: {{ $fullname }}-redis
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: {{ $fullname }}-kafka:9092
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ if .Values.infra.lgtm.enabled }}http://{{ $fullname }}-lgtm:4318{{ else }}{{ .Values.external.otlpEndpoint }}{{ end }}
+  {{- else }}
+  POSTGRES_HOST: {{ .Values.external.postgres.host | quote }}
+  POSTGRES_PORT: {{ .Values.external.postgres.port | quote }}
+  REDIS_HOST: {{ .Values.external.redis.host | quote }}
+  REDIS_PORT: {{ .Values.external.redis.port | quote }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ .Values.external.kafka.bootstrapServers | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.external.otlpEndpoint | quote }}
+  {{- end }}
+  # service discovery = Kubernetes Services (D8: URLs from env, no Eureka)
+  AUTH_SERVICE_URL: http://{{ $fullname }}-auth-service:8081
+  USER_SERVICE_URL: http://{{ $fullname }}-user-service:8082
+  WALLET_SERVICE_URL: http://{{ $fullname }}-wallet-service:8083
+  TRANSACTION_SERVICE_URL: http://{{ $fullname }}-transaction-service:8084
+  PAYMENT_SERVICE_URL: http://{{ $fullname }}-payment-service:8085
+  BILL_SERVICE_URL: http://{{ $fullname }}-bill-payment-service:8086
+  REWARDS_SERVICE_URL: http://{{ $fullname }}-rewards-service:8087
+  NOTIFICATION_SERVICE_URL: http://{{ $fullname }}-notification-service:8088
+  FRAUD_SERVICE_URL: http://{{ $fullname }}-fraud-risk-service:8089
+  RECON_SERVICE_URL: http://{{ $fullname }}-reconciliation-service:8090
+  ADMIN_SERVICE_URL: http://{{ $fullname }}-admin-service:8091
+  JWT_ISSUER: {{ .Values.config.jwtIssuer | default (printf "http://%s-auth-service:8081" $fullname) | quote }}
+  CORS_ALLOWED_ORIGINS: {{ .Values.config.corsAllowedOrigins | quote }}
+  OTP_SENDER: {{ .Values.config.otpSender | quote }}
+  RISK_ASSESSOR: {{ .Values.config.riskAssessor | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  TRACING_SAMPLING_PROBABILITY: {{ .Values.config.tracingSamplingProbability | quote }}
+  PAYVERSE_CRYPTO_KEY_ID: v1

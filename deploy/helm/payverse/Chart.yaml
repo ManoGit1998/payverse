@@ -1,0 +1,7 @@
+apiVersion: v2
+name: payverse
+description: PayVerse digital wallet platform — 12 Spring Boot services behind a gateway, with optional dev infrastructure.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [payments, wallet, spring-boot, microservices]

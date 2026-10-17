@@ -32,13 +32,13 @@ help: ## Show this help
 env: ## Create .env from .env.example with freshly generated secrets
 	@if [ -f .env ]; then echo ".env already exists — leaving it alone"; exit 0; fi; \
 	cp .env.example .env; \
-	sed -i '' "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 16)|" .env; \
-	sed -i '' "s|^SERVICE_DB_PASSWORD=.*|SERVICE_DB_PASSWORD=$$(openssl rand -hex 16)|" .env; \
-	sed -i '' "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=$$(openssl rand -hex 16)|" .env; \
-	sed -i '' "s|^SERVICE_CLIENT_SECRET=.*|SERVICE_CLIENT_SECRET=$$(openssl rand -hex 24)|" .env; \
-	sed -i '' "s|^PAYVERSE_CRYPTO_ENCRYPTION_KEY=.*|PAYVERSE_CRYPTO_ENCRYPTION_KEY=$$(openssl rand -base64 32)|" .env; \
-	sed -i '' "s|^PAYVERSE_CRYPTO_BLIND_INDEX_KEY=.*|PAYVERSE_CRYPTO_BLIND_INDEX_KEY=$$(openssl rand -base64 32)|" .env; \
-	echo "Created .env with random secrets"
+	sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 16)|" .env; \
+	sed -i.bak "s|^SERVICE_DB_PASSWORD=.*|SERVICE_DB_PASSWORD=$$(openssl rand -hex 16)|" .env; \
+	sed -i.bak "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=$$(openssl rand -hex 16)|" .env; \
+	sed -i.bak "s|^SERVICE_CLIENT_SECRET=.*|SERVICE_CLIENT_SECRET=$$(openssl rand -hex 24)|" .env; \
+	sed -i.bak "s|^PAYVERSE_CRYPTO_ENCRYPTION_KEY=.*|PAYVERSE_CRYPTO_ENCRYPTION_KEY=$$(openssl rand -base64 32)|" .env; \
+	sed -i.bak "s|^PAYVERSE_CRYPTO_BLIND_INDEX_KEY=.*|PAYVERSE_CRYPTO_BLIND_INDEX_KEY=$$(openssl rand -base64 32)|" .env; \
+	rm -f .env.bak; echo "Created .env with random secrets"
 
 .PHONY: testcontainers-reuse
 testcontainers-reuse: ## Enable Testcontainers container reuse (~/.testcontainers.properties)
@@ -145,6 +145,19 @@ load: ## k6 load test through the gateway (seeds users first; RATE, BROWSE_RATE,
 	@mkdir -p load-tests/results
 	docker run --rm -i --add-host=host.docker.internal:host-gateway -v $(CURDIR)/load-tests:/scripts -w /scripts \
 		-e BASE_URL -e RATE -e BROWSE_RATE -e DURATION grafana/k6:1.2.3 run --summary-export=results/summary.json payverse.js
+
+HELM := docker run --rm -v $(CURDIR)/deploy/helm:/charts -w /charts alpine/helm:3.17.3
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart and validate rendered manifests (kubeconform, Kubernetes 1.31) — runs in Docker
+	$(HELM) lint payverse
+	$(HELM) template payverse payverse | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.31.0 -
+
+.PHONY: k8s-render
+k8s-render: ## Re-render deploy/k8s/payverse-dev.yaml from the Helm chart
+	@{ echo "# Rendered from deploy/helm/payverse (make k8s-render). Dev profile: single-node infra included."; \
+	   echo "# Create the Secret first: deploy/k8s/create-secret.sh, then: kubectl apply -n payverse -f deploy/k8s/payverse-dev.yaml"; echo; \
+	   $(HELM) template payverse payverse --namespace payverse --set secrets.existingSecret=payverse-secrets; } > deploy/k8s/payverse-dev.yaml
 
 .PHONY: down
 down: ## Stop the service containers (infra keeps running)

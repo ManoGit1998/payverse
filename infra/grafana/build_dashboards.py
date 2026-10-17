@@ -6,6 +6,8 @@ import json
 import os
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboards")
+# the Helm chart can only read files inside itself, so it gets a copy
+CHART_COPY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "deploy", "helm", "payverse", "files", "dashboards")
 DS = {"type": "prometheus", "uid": "prometheus"}
 HTTP = 'http_server_requests_milliseconds'
 APP = 'uri!~"/actuator.*"'  # business traffic only
@@ -163,9 +165,11 @@ def business_board():
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
+    os.makedirs(CHART_COPY, exist_ok=True)
     for board in (services_board(), business_board()):
-        path = os.path.join(OUT, board.uid + ".json")
-        with open(path, "w") as f:
-            json.dump(board.json(), f, indent=2)
-            f.write("\n")
-        print("wrote", os.path.relpath(path))
+        for directory in (OUT, CHART_COPY):
+            path = os.path.join(directory, board.uid + ".json")
+            with open(path, "w") as f:
+                json.dump(board.json(), f, indent=2)
+                f.write("\n")
+            print("wrote", os.path.relpath(path))

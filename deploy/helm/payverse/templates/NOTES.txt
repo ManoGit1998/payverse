@@ -1,0 +1,11 @@
+PayVerse {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace {{ .Release.Namespace }}.
+
+Gateway: {{ if .Values.ingress.enabled }}http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}{{ else }}kubectl port-forward svc/{{ include "payverse.fullname" . }}-api-gateway 8080:8080{{ end }}
+{{- if and .Values.infra.enabled .Values.infra.lgtm.enabled }}
+Grafana:  kubectl port-forward svc/{{ include "payverse.fullname" . }}-lgtm 3000:3000   (admin/admin; PayVerse dashboards are provisioned)
+{{- end }}
+MOCK OTPs: kubectl logs deploy/{{ include "payverse.fullname" . }}-auth-service | grep "MOCK SMS"
+{{- if .Values.infra.enabled }}
+
+infra.enabled=true runs single-node Postgres/Redis/Kafka for development only — use managed services in production.
+{{- end }}

@@ -1,0 +1,3962 @@
+# Rendered from deploy/helm/payverse (make k8s-render). Dev profile: single-node infra included.
+# Create the Secret first: deploy/k8s/create-secret.sh, then: kubectl apply -n payverse -f deploy/k8s/payverse-dev.yaml
+
+---
+# Source: payverse/templates/networkpolicy.yaml
+# Every PayVerse pod: ingress only from pods of this release (service-to-service, infra).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payverse-same-release
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/instance: payverse }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/instance: payverse }
+---
+# Source: payverse/templates/networkpolicy.yaml
+# The gateway additionally accepts traffic from the ingress controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payverse-gateway-from-ingress
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: api-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports:
+        - { port: 8080 }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payverse-api-gateway
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: api-gateway
+---
+# Source: payverse/templates/services.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payverse-auth-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: auth-service
+---
+# Source: payverse/templates/services.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payverse-transaction-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: transaction-service
+---
+# Source: payverse/templates/services.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payverse-wallet-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: wallet-service
+---
+# Source: payverse/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payverse-config
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+data:
+  POSTGRES_HOST: payverse-postgres
+  POSTGRES_PORT: "5432"
+  REDIS_HOST: payverse-redis
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: payverse-kafka:9092
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://payverse-lgtm:4318
+  # service discovery = Kubernetes Services (D8: URLs from env, no Eureka)
+  AUTH_SERVICE_URL: http://payverse-auth-service:8081
+  USER_SERVICE_URL: http://payverse-user-service:8082
+  WALLET_SERVICE_URL: http://payverse-wallet-service:8083
+  TRANSACTION_SERVICE_URL: http://payverse-transaction-service:8084
+  PAYMENT_SERVICE_URL: http://payverse-payment-service:8085
+  BILL_SERVICE_URL: http://payverse-bill-payment-service:8086
+  REWARDS_SERVICE_URL: http://payverse-rewards-service:8087
+  NOTIFICATION_SERVICE_URL: http://payverse-notification-service:8088
+  FRAUD_SERVICE_URL: http://payverse-fraud-risk-service:8089
+  RECON_SERVICE_URL: http://payverse-reconciliation-service:8090
+  ADMIN_SERVICE_URL: http://payverse-admin-service:8091
+  JWT_ISSUER: "http://payverse-auth-service:8081"
+  CORS_ALLOWED_ORIGINS: "https://app.payverse.example"
+  OTP_SENDER: "log"
+  RISK_ASSESSOR: "remote"
+  LOG_FORMAT: "logstash"
+  TRACING_SAMPLING_PROBABILITY: "0.1"
+  PAYVERSE_CRYPTO_KEY_ID: v1
+---
+# Source: payverse/templates/infra/kafka.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payverse-kafka-topics
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+data:
+  create-topics.sh: |-
+    #!/usr/bin/env bash
+    # Creates every PayVerse topic and its dead-letter topic (<topic>.dlt).
+    # Keep in sync with com.payverse.common.events.Topics (EventCatalogTest verifies this file).
+    set -euo pipefail
+    
+    BOOTSTRAP="${KAFKA_BOOTSTRAP:-kafka:29092}"
+    PARTITIONS="${KAFKA_PARTITIONS:-3}"
+    KT=/opt/kafka/bin/kafka-topics.sh
+    
+    echo "Waiting for Kafka at $BOOTSTRAP ..."
+    until $KT --bootstrap-server "$BOOTSTRAP" --list >/dev/null 2>&1; do sleep 2; done
+    
+    TOPICS=(
+      payverse.auth.user-registered.v1
+      payverse.auth.new-device-login.v1
+      payverse.auth.pin-locked.v1
+      payverse.user.kyc-upgraded.v1
+      payverse.user.bank-account-linked.v1
+      payverse.wallet.created.v1
+      payverse.wallet.money-added.v1
+      payverse.wallet.money-withdrawn.v1
+      payverse.wallet.status-changed.v1
+      payverse.wallet.ledger-posted.v1
+      payverse.transaction.initiated.v1
+      payverse.transaction.completed.v1
+      payverse.transaction.failed.v1
+      payverse.transaction.reversed.v1
+      payverse.transaction.money-requested.v1
+      payverse.payment.collect-requested.v1
+      payverse.payment.pg-charge-settled.v1
+      payverse.bill.payment-completed.v1
+      payverse.bill.payment-failed.v1
+      payverse.bill.mandate-executed.v1
+      payverse.rewards.cashback-granted.v1
+      payverse.rewards.scratch-card-issued.v1
+      payverse.fraud.transaction-flagged.v1
+      payverse.admin.refund-approved.v1
+      payverse.recon.mismatch-detected.v1
+    )
+    
+    for topic in "${TOPICS[@]}"; do
+      $KT --bootstrap-server "$BOOTSTRAP" --create --if-not-exists --topic "$topic" \
+          --partitions "$PARTITIONS" --replication-factor 1 --config retention.ms=604800000 >/dev/null
+      $KT --bootstrap-server "$BOOTSTRAP" --create --if-not-exists --topic "$topic.dlt" \
+          --partitions 1 --replication-factor 1 --config retention.ms=1209600000 >/dev/null
+      echo "  ok  $topic (+ .dlt)"
+    done
+    echo "All topics created."
+---
+# Source: payverse/templates/infra/lgtm.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payverse-dashboards
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+data:
+  payverse.yaml: |
+    apiVersion: 1
+    providers:
+      - name: PayVerse
+        folder: PayVerse
+        type: file
+        options: { path: /otel-lgtm/payverse-dashboards }
+  payverse-business.json: |-
+    {
+      "uid": "payverse-business",
+      "title": "PayVerse \u2014 Payments",
+      "description": "Money movement, risk, rewards, notifications and reconciliation \u2014 from domain events.",
+      "tags": [
+        "payverse"
+      ],
+      "timezone": "browser",
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "editable": true,
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "templating": {
+        "list": []
+      },
+      "panels": [
+        {
+          "type": "row",
+          "title": "Today at a glance (selected range)",
+          "id": 1,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "Transfers completed",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_total{event_type=\"transaction.completed\"}[$__range]))",
+              "legendFormat": "Transfers completed",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 2,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Transfer value",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_amount_inr_sum{event_type=\"transaction.completed\"}[$__range]))",
+              "legendFormat": "Transfer value",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyINR",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 3,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 4,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Transfers failed",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_total{event_type=\"transaction.failed\"}[$__range]))",
+              "legendFormat": "Transfers failed",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 4,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Money added",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_amount_inr_sum{event_type=\"wallet.money-added\"}[$__range]))",
+              "legendFormat": "Money added",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyINR",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 5,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Bills paid",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_total{event_type=\"bill.payment-completed\"}[$__range]))",
+              "legendFormat": "Bills paid",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 6,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Cashback paid",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_amount_inr_sum{event_type=\"rewards.cashback-granted\"}[$__range]))",
+              "legendFormat": "Cashback paid",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyINR",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 7,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 20,
+            "y": 1,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Blocked by risk",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_risk_decisions_total{decision=\"BLOCK\"}[$__range]))",
+              "legendFormat": "Blocked by risk",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 8,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Refunds (reversed)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_total{event_type=\"transaction.reversed\"}[$__range]))",
+              "legendFormat": "Refunds (reversed)",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 9,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 4,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Recon mismatches",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_events_total{event_type=\"recon.mismatch-detected\"}[$__range]))",
+              "legendFormat": "Recon mismatches",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 10,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Notifications DEAD",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(increase(payverse_notifications_total{outcome=\"DEAD\"}[$__range]))",
+              "legendFormat": "Notifications DEAD",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 11,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Outbox backlog (max)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(payverse_outbox_pending)",
+              "legendFormat": "Outbox backlog (max)",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 100
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 12,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Oldest unpublished event",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max(payverse_outbox_oldest_age_seconds)",
+              "legendFormat": "Oldest unpublished event",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 30
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "id": 13,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 20,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          }
+        },
+        {
+          "type": "row",
+          "title": "Money movement (per minute)",
+          "id": 14,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 11,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Transfers",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"transaction.completed\"}[$__rate_interval])) * 60",
+              "legendFormat": "completed",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"transaction.failed\"}[$__rate_interval])) * 60",
+              "legendFormat": "failed",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"transaction.reversed\"}[$__rate_interval])) * 60",
+              "legendFormat": "refunded",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 15,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 12,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Value moved (INR / min)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (event_type) (rate(payverse_events_amount_inr_sum{event_type=~\"transaction.completed|wallet.money-added|wallet.money-withdrawn|bill.payment-completed\"}[$__rate_interval])) * 60",
+              "legendFormat": "{{event_type}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyINR",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 16,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 12,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Bills and wallet",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"bill.payment-completed\"}[$__rate_interval])) * 60",
+              "legendFormat": "bill paid",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"bill.payment-failed\"}[$__rate_interval])) * 60",
+              "legendFormat": "bill failed",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"wallet.money-added\"}[$__rate_interval])) * 60",
+              "legendFormat": "money added",
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"wallet.money-withdrawn\"}[$__rate_interval])) * 60",
+              "legendFormat": "withdrawn",
+              "refId": "D"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 17,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 12,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Transfer size p50 / p95 (INR)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(payverse_events_amount_inr_bucket{event_type=\"transaction.completed\"}[$__rate_interval])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(payverse_events_amount_inr_bucket{event_type=\"transaction.completed\"}[$__rate_interval])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyINR",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 18,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 20,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "All domain events / min",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (event_type) (rate(payverse_events_total[$__rate_interval])) * 60",
+              "legendFormat": "{{event_type}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 19,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 20,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "type": "row",
+          "title": "Risk, rewards and notifications",
+          "id": 20,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 28,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Risk decisions / min",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (decision) (rate(payverse_risk_decisions_total[$__rate_interval])) * 60",
+              "legendFormat": "{{decision}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 21,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 29,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Risk rules triggered / min",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (rule) (rate(payverse_risk_rule_hits_total[$__rate_interval])) * 60",
+              "legendFormat": "{{rule}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 22,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 29,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Rewards / min",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"rewards.scratch-card-issued\"}[$__rate_interval])) * 60",
+              "legendFormat": "scratch cards issued",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(payverse_events_total{event_type=\"rewards.cashback-granted\"}[$__rate_interval])) * 60",
+              "legendFormat": "cashback credited",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 23,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 29,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Notifications / min",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (channel, outcome) (rate(payverse_notifications_total[$__rate_interval])) * 60",
+              "legendFormat": "{{channel}} {{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 24,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 29,
+            "w": 6,
+            "h": 8
+          }
+        }
+      ]
+    }
+    
+  payverse-services.json: |-
+    {
+      "uid": "payverse-services",
+      "title": "PayVerse \u2014 Services",
+      "description": "RED metrics, JVM, connection pools and Kafka consumer lag per service.",
+      "tags": [
+        "payverse"
+      ],
+      "timezone": "browser",
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "editable": true,
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "service",
+            "label": "Service",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "query": {
+              "query": "label_values(http_server_requests_milliseconds_count, service_name)",
+              "refId": "v"
+            },
+            "definition": "label_values(http_server_requests_milliseconds_count, service_name)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "allValue": ".*",
+            "current": {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
+            "sort": 1
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "row",
+          "title": "Traffic (excluding actuator)",
+          "id": 1,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Requests / s",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (rate(http_server_requests_milliseconds_count{service_name=~\"$service\",uri!~\"/actuator.*\"}[$__rate_interval]))",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 2,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Server errors (5xx) %",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * sum by (service_name) (rate(http_server_requests_milliseconds_count{service_name=~\"$service\",uri!~\"/actuator.*\",status=~\"5..\"}[$__rate_interval])) / sum by (service_name) (rate(http_server_requests_milliseconds_count{service_name=~\"$service\",uri!~\"/actuator.*\"}[$__rate_interval]))",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 3,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "p95 latency",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate(http_server_requests_milliseconds_bucket{service_name=~\"$service\",uri!~\"/actuator.*\"}[$__rate_interval])))",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 4,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Client errors by code (4xx / s)",
+          "description": "422 = business refusals (limits, PIN, balance), 401/403 = auth, 429 = rate limited",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (status, service_name) (rate(http_server_requests_milliseconds_count{service_name=~\"$service\",uri!~\"/actuator.*\",status=~\"4..\"}[$__rate_interval]))",
+              "legendFormat": "{{service_name}} {{status}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 5,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Slowest endpoints (p95)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "topk(10, histogram_quantile(0.95, sum by (le, service_name, uri, method) (rate(http_server_requests_milliseconds_bucket{service_name=~\"$service\",uri!~\"/actuator.*\"}[$__rate_interval]))))",
+              "legendFormat": "{{service_name}} {{method}} {{uri}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 6,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "type": "row",
+          "title": "JVM and resources",
+          "id": 7,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 17,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "Heap used",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (jvm_memory_used_bytes{service_name=~\"$service\",area=\"heap\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 8,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 18,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "CPU",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (service_name) (process_cpu_usage{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 9,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 18,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "GC pause time / s",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (rate(jvm_gc_pause_milliseconds_sum{service_name=~\"$service\"}[$__rate_interval]))",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 10,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 18,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Live threads",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (jvm_threads_live{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 11,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 18,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "row",
+          "title": "Database and Kafka",
+          "id": 12,
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 26,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "DB connections in use",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (hikaricp_connections_active{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 13,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Threads waiting for a DB connection",
+          "description": "Anything above 0 for long means the pool (10\u201315) is too small or queries are slow",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service_name) (hikaricp_connections_pending{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 14,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 27,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka consumer lag (max records)",
+          "description": "",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (service_name, topic) (kafka_consumer_fetch_manager_records_lag_max{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}} \u2190 {{topic}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 15,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 27,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Outbox backlog",
+          "description": "Committed events not yet published to Kafka; should drain within a second",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (service_name) (payverse_outbox_pending{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (service_name) (payverse_outbox_oldest_age_seconds{service_name=~\"$service\"})",
+              "legendFormat": "{{service_name}} oldest (s)",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 16,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 27,
+            "w": 6,
+            "h": 8
+          }
+        }
+      ]
+    }
+---
+# Source: payverse/templates/infra/postgres.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payverse-postgres-init
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+data:
+  01-create-databases.sh: |-
+    #!/usr/bin/env bash
+    # Creates one database + one owner role per service (database-per-service pattern).
+    # Runs once, on first start of an empty Postgres volume.
+    set -euo pipefail
+    
+    : "${SERVICE_DB_PASSWORD:?SERVICE_DB_PASSWORD must be set}"
+    
+    for svc in auth user wallet txn payment bill rewards notification fraud recon admin; do
+      echo "Creating database ${svc}_db owned by ${svc}_svc"
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-SQL
+        DO \$\$
+        BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${svc}_svc') THEN
+            CREATE ROLE ${svc}_svc LOGIN PASSWORD '${SERVICE_DB_PASSWORD}';
+          END IF;
+        END
+        \$\$;
+        SELECT 'CREATE DATABASE ${svc}_db OWNER ${svc}_svc'
+          WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${svc}_db')\gexec
+        REVOKE ALL ON DATABASE ${svc}_db FROM PUBLIC;
+    SQL
+    done
+---
+# Source: payverse/templates/infra/kafka.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-kafka
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  selector: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: kafka }
+  ports:
+    - { name: kafka, port: 9092 }
+    - { name: controller, port: 9093 }
+---
+# Source: payverse/templates/infra/lgtm.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-lgtm
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  selector: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: lgtm }
+  ports:
+    - { name: grafana, port: 3000 }
+    - { name: otlp-grpc, port: 4317 }
+    - { name: otlp-http, port: 4318 }
+---
+# Source: payverse/templates/infra/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-postgres
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  selector: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: postgres }
+  ports: [{ name: postgres, port: 5432 }]
+---
+# Source: payverse/templates/infra/redis.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-redis
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  selector: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: redis }
+  ports: [{ name: redis, port: 6379 }]
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-admin-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: admin-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: admin-service
+  ports:
+    - { name: http, port: 8091, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-api-gateway
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: api-gateway
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: api-gateway
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-auth-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: auth-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: auth-service
+  ports:
+    - { name: http, port: 8081, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-bill-payment-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: bill-payment-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: bill-payment-service
+  ports:
+    - { name: http, port: 8086, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-fraud-risk-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: fraud-risk-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: fraud-risk-service
+  ports:
+    - { name: http, port: 8089, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-notification-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: notification-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: notification-service
+  ports:
+    - { name: http, port: 8088, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-payment-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: payment-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: payment-service
+  ports:
+    - { name: http, port: 8085, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-reconciliation-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: reconciliation-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: reconciliation-service
+  ports:
+    - { name: http, port: 8090, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-rewards-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: rewards-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: rewards-service
+  ports:
+    - { name: http, port: 8087, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-transaction-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: transaction-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: transaction-service
+  ports:
+    - { name: http, port: 8084, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-user-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: user-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: user-service
+  ports:
+    - { name: http, port: 8082, targetPort: http }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payverse-wallet-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: wallet-service
+spec:
+  selector:
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/name: wallet-service
+  ports:
+    - { name: http, port: 8083, targetPort: http }
+---
+# Source: payverse/templates/infra/lgtm.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-lgtm
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: lgtm }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: lgtm
+    spec:
+      containers:
+        - name: lgtm
+          image: grafana/otel-lgtm:0.36.0
+          ports:
+            - { name: grafana, containerPort: 3000 }
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1536Mi } }
+          volumeMounts:
+            - { name: dashboards, mountPath: /otel-lgtm/payverse-dashboards }
+            - { name: dashboards, mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/payverse.yaml, subPath: payverse.yaml }
+      volumes:
+        - name: dashboards
+          configMap: { name: payverse-dashboards }
+---
+# Source: payverse/templates/infra/redis.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-redis
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: redis }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:8.8-alpine
+          # noeviction: idempotency keys, OTPs and locks must never be silently evicted
+          command: ["sh", "-c", "exec redis-server --maxmemory 200mb --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\""]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: payverse-secrets, key: REDIS_PASSWORD } }
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"] }
+            periodSeconds: 5
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-admin-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: admin-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: admin-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: admin-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: admin-service
+      containers:
+        - name: admin-service
+          image: ghcr.io/payverse/admin-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8091 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8091" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-api-gateway
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: api-gateway
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: api-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: api-gateway
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: api-gateway
+      containers:
+        - name: api-gateway
+          image: ghcr.io/payverse/api-gateway:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8080" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+            - { name: SERVER_FORWARD_HEADERS_STRATEGY, value: "framework" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-auth-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: auth-service
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: auth-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: auth-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: auth-service
+      containers:
+        - name: auth-service
+          image: ghcr.io/payverse/auth-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8081 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8081" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 768Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-bill-payment-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: bill-payment-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: bill-payment-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: bill-payment-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: bill-payment-service
+      containers:
+        - name: bill-payment-service
+          image: ghcr.io/payverse/bill-payment-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8086 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8086" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-fraud-risk-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: fraud-risk-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: fraud-risk-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: fraud-risk-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: fraud-risk-service
+      containers:
+        - name: fraud-risk-service
+          image: ghcr.io/payverse/fraud-risk-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8089 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8089" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-notification-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: notification-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: notification-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: notification-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: notification-service
+      containers:
+        - name: notification-service
+          image: ghcr.io/payverse/notification-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8088 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8088" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-payment-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: payment-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: payment-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: payment-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: payment-service
+      containers:
+        - name: payment-service
+          image: ghcr.io/payverse/payment-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8085 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8085" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-reconciliation-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: reconciliation-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: reconciliation-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: reconciliation-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: reconciliation-service
+      containers:
+        - name: reconciliation-service
+          image: ghcr.io/payverse/reconciliation-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8090 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8090" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-rewards-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: rewards-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: rewards-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: rewards-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: rewards-service
+      containers:
+        - name: rewards-service
+          image: ghcr.io/payverse/rewards-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8087 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8087" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-transaction-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: transaction-service
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: transaction-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: transaction-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: transaction-service
+      containers:
+        - name: transaction-service
+          image: ghcr.io/payverse/transaction-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8084 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8084" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-user-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: user-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: user-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: user-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: user-service
+      containers:
+        - name: user-service
+          image: ghcr.io/payverse/user-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8082 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8082" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/services.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payverse-wallet-service
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+    app.kubernetes.io/name: wallet-service
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: payverse
+      app.kubernetes.io/name: wallet-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: wallet-service
+      annotations:
+        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: payverse
+              app.kubernetes.io/name: wallet-service
+      containers:
+        - name: wallet-service
+          image: ghcr.io/payverse/wallet-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8083 }
+          envFrom:
+            - configMapRef: { name: payverse-config }
+            - secretRef: { name: payverse-secrets }
+          env:
+            - { name: SERVER_PORT, value: "8083" }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" }
+          resources:
+            limits:
+              memory: 640Mi
+            requests:
+              cpu: 100m
+              memory: 384Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36            # up to 3 minutes to start (Flyway, Kafka)
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let endpoints drop the pod before graceful shutdown starts
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+# Source: payverse/templates/infra/kafka.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: payverse-kafka
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  serviceName: payverse-kafka
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: kafka }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: kafka
+    spec:
+      securityContext: { fsGroup: 1000 }
+      containers:
+        - name: kafka
+          image: apache/kafka:4.3.1
+          env:
+            - { name: CLUSTER_ID, value: payverse-k8s-kraft-01 }
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://payverse-kafka:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0" }
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
+            - { name: KAFKA_NUM_PARTITIONS, value: "3" }
+            - { name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data/logs }
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx512m -Xms256m" }
+          ports:
+            - { name: kafka, containerPort: 9092 }
+            - { name: controller, containerPort: 9093 }
+          readinessProbe:
+            tcpSocket: { port: kafka }
+            periodSeconds: 10
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1Gi } }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/kafka/data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 5Gi } }
+---
+# Source: payverse/templates/infra/postgres.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: payverse-postgres
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  serviceName: payverse-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/instance: payverse, app.kubernetes.io/name: postgres }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          args: ["-c", "shared_buffers=128MB", "-c", "max_connections=200", "-c", "work_mem=4MB"]
+          env:
+            - { name: POSTGRES_USER, value: "payverse" }
+            - { name: POSTGRES_DB, value: postgres }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: payverse-secrets, key: POSTGRES_PASSWORD } }
+            - name: SERVICE_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: payverse-secrets, key: SERVICE_DB_PASSWORD } }
+          ports: [{ name: postgres, containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d postgres"] }
+            periodSeconds: 5
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 768Mi } }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+      volumes:
+        - name: init
+          configMap: { name: payverse-postgres-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 5Gi } }
+---
+# Source: payverse/templates/infra/kafka.yaml
+# Creates every topic and its .dlt twin (idempotent); re-runs on each install/upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: payverse-kafka-topics-1
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: payverse
+        app.kubernetes.io/instance: payverse
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: payverse-0.1.0
+        app.kubernetes.io/name: kafka-topics
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: apache/kafka:4.3.1
+          command: ["/bin/bash", "/scripts/create-topics.sh"]
+          env:
+            - { name: KAFKA_BOOTSTRAP, value: "payverse-kafka:9092" }
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx128m" }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+          resources: { limits: { memory: 256Mi } }
+      volumes:
+        - name: scripts
+          configMap: { name: payverse-kafka-topics }
+---
+# Source: payverse/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payverse
+  labels:
+    app.kubernetes.io/part-of: payverse
+    app.kubernetes.io/instance: payverse
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: payverse-0.1.0
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 6m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "api.payverse.local"
+      http:
+        paths:
+          # Only the gateway is exposed; /internal/** is never routed by it (and needs a SERVICE token anyway).
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: payverse-api-gateway
+                port: { name: http }

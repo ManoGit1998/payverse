@@ -1,0 +1,85 @@
+# PayVerse Helm values. Defaults suit a single-node dev cluster (OrbStack, kind, minikube) with infra.enabled=true.
+# Production: infra.enabled=false, point external.* at managed Postgres/Redis/Kafka, use secrets.existingSecret,
+# set image.registry and an immutable image.tag, and raise replicas / enable autoscaling per service.
+
+image:
+  registry: ghcr.io/payverse        # images are pushed by CI as <registry>/<service>:<tag>
+  tag: ""                           # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# One entry per service: container port, replicas and overrides. Order is cosmetic.
+services:
+  api-gateway:            { port: 8080, replicas: 2, env: { SERVER_FORWARD_HEADERS_STRATEGY: framework } }
+  auth-service:           { port: 8081, replicas: 2, resources: { limits: { memory: 768Mi } } }   # Argon2 PIN hashing is memory-hard
+  user-service:           { port: 8082, replicas: 1 }
+  wallet-service:         { port: 8083, replicas: 2 }
+  transaction-service:    { port: 8084, replicas: 2 }
+  payment-service:        { port: 8085, replicas: 1 }
+  bill-payment-service:   { port: 8086, replicas: 1 }
+  rewards-service:        { port: 8087, replicas: 1 }
+  notification-service:   { port: 8088, replicas: 1 }
+  fraud-risk-service:     { port: 8089, replicas: 1 }
+  reconciliation-service: { port: 8090, replicas: 1 }
+  admin-service:          { port: 8091, replicas: 1 }
+
+# Applied to every service unless overridden in services.<name>
+defaults:
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 640Mi }
+  javaToolOptions: >-
+    -XX:InitialRAMPercentage=20 -XX:MaxRAMPercentage=40 -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m
+    -XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+  autoscaling:                      # per-service override: services.<name>.autoscaling.enabled: true
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    minAvailable: 1                 # only rendered for services with replicas > 1
+  terminationGracePeriodSeconds: 40 # > spring.lifecycle.timeout-per-shutdown-phase (20s) + preStop (5s)
+
+config:
+  logFormat: logstash
+  tracingSamplingProbability: "0.1"
+  corsAllowedOrigins: https://app.payverse.example
+  otpSender: log                    # MOCK: OTPs go to the auth-service log
+  riskAssessor: remote
+  jwtIssuer: ""                     # defaults to the in-cluster auth-service URL
+
+# External infrastructure (used when infra.enabled=false)
+external:
+  postgres: { host: postgres.example.internal, port: 5432 }
+  redis: { host: redis.example.internal, port: 6379 }
+  kafka: { bootstrapServers: kafka.example.internal:9092 }
+  otlpEndpoint: http://otel-collector.observability:4318
+
+# Secrets: either reference an existing Secret with the keys below, or let the chart create one
+# (random values, kept across upgrades). Keys: POSTGRES_PASSWORD, SERVICE_DB_PASSWORD, REDIS_PASSWORD,
+# SERVICE_CLIENT_SECRET, PAYVERSE_CRYPTO_ENCRYPTION_KEY, PAYVERSE_CRYPTO_BLIND_INDEX_KEY, ADMIN_MOBILES, SUPPORT_MOBILES.
+secrets:
+  existingSecret: ""
+  adminMobiles: "9000000001"
+  supportMobiles: "9000000002"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.payverse.local
+  tls: []                           # e.g. [{ secretName: payverse-tls, hosts: [api.payverse.example] }]
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 6m
+
+networkPolicy:
+  enabled: true                     # pods accept traffic from the same release only; the gateway also from the ingress controller
+  ingressControllerNamespace: ingress-nginx
+
+# Single-node dev infrastructure. NOT for production (no HA, no backups).
+infra:
+  enabled: true
+  storageClass: ""                  # cluster default
+  postgres: { image: "postgres:17-alpine", storage: 5Gi, user: payverse }
+  redis: { image: "redis:8.8-alpine" }
+  kafka: { image: "apache/kafka:4.3.1", storage: 5Gi }
+  lgtm: { enabled: true, image: "grafana/otel-lgtm:0.36.0" }
