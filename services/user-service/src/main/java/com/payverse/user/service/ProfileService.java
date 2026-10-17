@@ -1,5 +1,8 @@
 package com.payverse.user.service;
 
+import com.payverse.user.entity.KycTier;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 import com.payverse.common.error.PayverseException;
 import com.payverse.user.entity.UserProfile;
 import com.payverse.user.exception.UserErrorCode;
@@ -51,5 +54,11 @@ public class ProfileService {
     public void onUserRegistered(UUID userId, String mobileMasked) {
         profiles.insertIfAbsent(userId, mobileMasked, clock.instant());
         profiles.findById(userId).ifPresent(profile -> profile.attachMobile(mobileMasked, clock.instant()));
+    }
+
+    /** Back-office search (admin-service). */
+    @Transactional(readOnly = true)
+    public Page<UserProfile> search(String name, KycTier tier, int page, int size) {
+        return profiles.search(name == null ? "" : name.trim(), tier, PageRequest.of(page, size));
     }
 }

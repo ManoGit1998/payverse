@@ -10,6 +10,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import com.payverse.user.entity.KycTier;
+import java.util.List;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
@@ -34,6 +37,13 @@ public class InternalUserController {
     @GetMapping("/{userId}")
     public InternalUserResponse user(@PathVariable UUID userId) {
         return mapper.toInternal(profiles.get(userId));
+    }
+
+    @Operation(summary = "Search profiles by name (contains) and KYC tier — admin back office")
+    @GetMapping("/search")
+    public List<InternalUserResponse> search(@RequestParam(required = false) String name, @RequestParam(required = false) KycTier kycTier,
+                                             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return profiles.search(name, kycTier, Math.max(page, 0), Math.min(Math.max(size, 1), 100)).map(mapper::toInternal).getContent();
     }
 
     @Operation(summary = "A user's linked bank account (masked) — used for withdrawals")

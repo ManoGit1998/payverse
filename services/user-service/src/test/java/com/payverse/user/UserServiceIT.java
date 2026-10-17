@@ -268,5 +268,10 @@ class UserServiceIT {
         mvc.perform(get("/internal/users/" + UUID.randomUUID()).header(HttpHeaders.AUTHORIZATION, service))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("USER_PROFILE_NOT_FOUND"));
+        mvc.perform(get("/internal/users/search").param("name", "asha ver").param("kycTier", "MIN_KYC").param("size", "100").header(HttpHeaders.AUTHORIZATION, service))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.userId == '" + user + "')].fullName").value("Asha Verma"));
+        mvc.perform(get("/internal/users/search?name=asha&kycTier=FULL_KYC&size=100").header(HttpHeaders.AUTHORIZATION, service))
+                .andExpect(jsonPath("$[?(@.userId == '" + user + "')]").isEmpty());
     }
 }

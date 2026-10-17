@@ -260,6 +260,10 @@ class PaymentServiceIT {
                 assertThat(jdbc.queryForObject("SELECT status FROM collect_requests WHERE id = ?::uuid", String.class, collectId)).isEqualTo("APPROVED"));
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(jdbc.queryForObject("SELECT rrn FROM upi_switch_records WHERE transaction_id = ?", String.class, txn)).hasSize(12));
+        String window = "from=" + java.time.Instant.now().minusSeconds(600) + "&to=" + java.time.Instant.now().plusSeconds(60);
+        String records = mvc.perform(get("/internal/upi/switch-records?size=1000&" + window).header(HttpHeaders.AUTHORIZATION, service()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<java.util.List<Object>>read(records, "$.items[?(@.transactionId == '" + txn + "')]")).hasSize(1);
     }
 
     @Test
@@ -316,5 +320,14 @@ class PaymentServiceIT {
                         .content("{\"userId\":\"" + user + "\",\"amount\":100.13,\"method\":\"CARD\",\"idempotencyKey\":\"" + UUID.randomUUID() + "\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DECLINED"))
                 .andExpect(jsonPath("$.failureReason").value(org.hamcrest.Matchers.containsString(".13")));
+
+        String window = "from=" + java.time.Instant.now().minusSeconds(600) + "&to=" + java.time.Instant.now().plusSeconds(60);
+        String charges = mvc.perform(get("/internal/pg/charges?size=1000&" + window).header(HttpHeaders.AUTHORIZATION, service()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<java.util.List<String>>read(charges, "$.items[?(@.orderId == '" + JsonPath.read(first, "$.orderId") + "')].providerReference"))
+                .containsExactly(JsonPath.<String>read(first, "$.providerReference"));
+        String declined = mvc.perform(get("/internal/pg/charges?status=DECLINED&size=1000&" + window).header(HttpHeaders.AUTHORIZATION, service()))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<java.util.List<String>>read(declined, "$.items[*].orderId")).doesNotContain(JsonPath.<String>read(first, "$.orderId"));
     }
 }

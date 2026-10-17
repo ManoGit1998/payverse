@@ -18,6 +18,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -118,6 +119,15 @@ class WalletApiIT extends WalletIntegrationTest {
         await().atMost(Duration.ofSeconds(15)).until(() -> jdbc.queryForObject(
                 "SELECT count(*) FROM outbox_events WHERE event_type IN ('wallet.money-added','wallet.ledger-posted') AND published_at IS NOT NULL AND payload::text LIKE ?",
                 Integer.class, "%" + JsonPath.read(first, "$.journalId") + "%") == 2);
+
+        String window = "from=" + java.time.Instant.now().minusSeconds(600) + "&to=" + java.time.Instant.now().plusSeconds(60);
+        String journals = mvc.perform(get("/internal/ledger/journals?type=ADD_MONEY&size=1000&" + window)
+                        .header(HttpHeaders.AUTHORIZATION, serviceBearer("reconciliation-service")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        List<String> refs = JsonPath.read(journals, "$.items[?(@.journalId == '" + JsonPath.read(first, "$.journalId") + "')].referenceId");
+        assertThat(refs).containsExactly(JsonPath.<String>read(first, "$.paymentReference"));
+        mvc.perform(get("/internal/ledger/journals?type=ADD_MONEY&" + window).header(HttpHeaders.AUTHORIZATION, bearer(user)))
+                .andExpect(status().isForbidden());
     }
 
     @Test

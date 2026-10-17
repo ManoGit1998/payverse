@@ -1,6 +1,9 @@
 package com.payverse.user.repository;
 
 import com.payverse.user.entity.UserProfile;
+import com.payverse.user.entity.KycTier;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -19,4 +22,13 @@ public interface UserProfileRepository extends JpaRepository<UserProfile, UUID> 
             ON CONFLICT (user_id) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("userId") UUID userId, @Param("mobileMasked") String mobileMasked, @Param("now") Instant now);
+
+    /** Back-office search: name contains (case-insensitive), optional tier. */
+    @Query("""
+            select p from UserProfile p
+            where (:name = '' or lower(p.fullName) like lower(concat('%', :name, '%')))
+              and (:tier is null or p.kycTier = :tier)
+            order by p.createdAt desc
+            """)
+    Page<UserProfile> search(@Param("name") String name, @Param("tier") KycTier tier, Pageable pageable);
 }

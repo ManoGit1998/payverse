@@ -6,6 +6,8 @@ import com.payverse.wallet.dto.LedgerEntryResponse;
 import com.payverse.wallet.dto.MoneyDto;
 import com.payverse.wallet.dto.PageResponse;
 import com.payverse.wallet.entity.Journal;
+import com.payverse.wallet.entity.JournalType;
+import com.payverse.wallet.model.JournalSummary;
 import com.payverse.wallet.entity.LedgerEntry;
 import com.payverse.wallet.entity.SystemAccount;
 import com.payverse.wallet.entity.Wallet;
@@ -48,6 +50,12 @@ public class LedgerQueryService {
         this.journals = journals;
         this.mapper = mapper;
         this.clock = clock;
+    }
+
+    /** Journals of one type in [from, to) for reconciliation. */
+    @Transactional(readOnly = true)
+    public Page<JournalSummary> journals(JournalType type, Instant from, Instant to, int page, int size) {
+        return journals.findSummaries(type, from, to, PageRequest.of(page, size));
     }
 
     @Transactional(readOnly = true)
