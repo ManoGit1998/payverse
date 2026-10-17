@@ -24,10 +24,12 @@ import java.util.Map;
  * @param summaryCacheTtl      TTL of the cached wallet summary
  * @param authServiceUrl       base URL of auth-service (PIN verification)
  * @param userServiceUrl       base URL of user-service (bank accounts)
+ * @param paymentServiceUrl    base URL of payment-service (payment-gateway charges)
  */
 @ConfigurationProperties("payverse.wallet")
 public record WalletProperties(Map<KycTier, TierLimits> limits, BigDecimal maxTransactionAmount, Duration lockWait,
-                               Duration lockLease, Duration summaryCacheTtl, String authServiceUrl, String userServiceUrl) {
+                               Duration lockLease, Duration summaryCacheTtl, String authServiceUrl, String userServiceUrl,
+                               String paymentServiceUrl) {
 
     public record TierLimits(BigDecimal maxBalance, BigDecimal monthlyLoad, BigDecimal dailyDebit) {
     }
@@ -47,6 +49,7 @@ public record WalletProperties(Map<KycTier, TierLimits> limits, BigDecimal maxTr
         summaryCacheTtl = summaryCacheTtl == null ? Duration.ofSeconds(60) : summaryCacheTtl;
         authServiceUrl = authServiceUrl == null ? "http://localhost:8081" : authServiceUrl;
         userServiceUrl = userServiceUrl == null ? "http://localhost:8082" : userServiceUrl;
+        paymentServiceUrl = paymentServiceUrl == null ? "http://localhost:8085" : paymentServiceUrl;
     }
 
     public TierLimits limitsFor(KycTier tier) {

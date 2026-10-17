@@ -33,7 +33,7 @@ class LimitServiceTest {
 
     final Map<String, LimitUsage> store = new HashMap<>();
     final LimitUsageRepository repository = mock(LimitUsageRepository.class);
-    final WalletProperties properties = new WalletProperties(null, null, null, null, null, null, null);
+    final WalletProperties properties = new WalletProperties(null, null, null, null, null, null, null, null);
     LimitService service;
 
     @BeforeEach
@@ -109,9 +109,6 @@ class LimitServiceTest {
 
     @Test
     void mockGatewaysFollowTheirDocumentedRules() {
-        PaymentGateway pg = new MockPaymentGatewayAdapter();
-        assertThat(pg.charge(UUID.randomUUID(), Money.inr("100.13"), "UPI", "k")).isInstanceOf(PaymentGateway.ChargeResult.Declined.class);
-        assertThat(pg.charge(UUID.randomUUID(), Money.inr("100.00"), "UPI", "k")).isInstanceOf(PaymentGateway.ChargeResult.Succeeded.class);
         PayoutGateway payout = new MockPayoutAdapter();
         assertThat(payout.initiate(UUID.randomUUID(), UUID.randomUUID(), Money.inr("10"), "k")).startsWith("MOCKIMPS-");
         assertThatThrownBy(() -> payout.initiate(UUID.randomUUID(), UUID.randomUUID(), Money.inr("10.14"), "k"))

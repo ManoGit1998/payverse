@@ -51,6 +51,7 @@ abstract class WalletIntegrationTest {
     static void downstream(DynamicPropertyRegistry registry) {
         registry.add("payverse.wallet.auth-service-url", DOWNSTREAM::baseUrl);
         registry.add("payverse.wallet.user-service-url", DOWNSTREAM::baseUrl);
+        registry.add("payverse.wallet.payment-service-url", DOWNSTREAM::baseUrl);
         registry.add("payverse.service-client.token-uri", () -> DOWNSTREAM.baseUrl() + "/api/v1/auth/oauth/token");
         registry.add("payverse.service-client.client-secret", () -> "it-secret");
     }
@@ -80,6 +81,12 @@ abstract class WalletIntegrationTest {
         DOWNSTREAM.resetAll();
         DOWNSTREAM.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post("/api/v1/auth/oauth/token").willReturn(okJson(
                 "{\"access_token\":\"" + TestJwts.INSTANCE.token("wallet-service", List.of("SERVICE")) + "\",\"token_type\":\"Bearer\",\"expires_in\":300}")));
+        // payment-service gateway: approves, except amounts ending in .13 (same rule as its MOCK gateway)
+        DOWNSTREAM.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post("/internal/pg/charges").atPriority(10).willReturn(okJson(
+                "{\"orderId\":\"" + UUID.randomUUID() + "\",\"status\":\"SUCCEEDED\",\"providerReference\":\"MOCKPG-IT\"}")));
+        DOWNSTREAM.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post("/internal/pg/charges").atPriority(1)
+                .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath("$.amount", com.github.tomakehurst.wiremock.client.WireMock.matching(".*\\.13$")))
+                .willReturn(okJson("{\"orderId\":\"" + UUID.randomUUID() + "\",\"status\":\"DECLINED\",\"failureReason\":\"mock decline\"}")));
     }
 
     static String bearer(UUID userId) {

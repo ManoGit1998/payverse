@@ -13,8 +13,8 @@ com.payverse.wallet
 ├── repository  Spring Data repositories (incl. integrity queries)
 ├── service     WalletPostingService (the only ledger writer), WalletService, AddMoneyService, WithdrawalService,
 │               LimitService, LedgerQueryService, WalletLock (Redis), BalanceCache, WalletEventPublisher,
-│               PaymentGateway + MockPaymentGatewayAdapter, PayoutGateway + MockPayoutAdapter
-├── client      AuthClient (PIN verify), UserClient (bank accounts) — service tokens + circuit breakers
+│               PaymentGateway (→ client.PaymentServiceGateway), PayoutGateway + MockPayoutAdapter
+├── client      AuthClient (PIN verify), UserClient (bank accounts), PaymentServiceGateway (charges) — service tokens + circuit breakers
 ├── messaging   WalletEventListeners (auth.user-registered → create wallet, user.kyc-upgraded → tier)
 ├── mapper      WalletMapper (MapStruct)
 └── exception   WalletErrorCode
@@ -85,7 +85,7 @@ use the Asia/Kolkata calendar. The maximum single transaction is ₹1,00,000. Re
 
 | Mock | Rule |
 |---|---|
-| `MockPaymentGatewayAdapter` | Approves add money instantly; **amounts ending in .13 are declined** (402). Replaced by payment-service in Phase 4 |
+| payment-service `MockPaymentGatewayAdapter` | Add money charges go through payment-service (`POST /internal/pg/charges`, idempotent per key); **amounts ending in .13 are declined** (402) |
 | `MockPayoutAdapter` | Accepts payouts; **amounts ending in .14 fail** (502) and the withdrawal rolls back |
 
 ## API

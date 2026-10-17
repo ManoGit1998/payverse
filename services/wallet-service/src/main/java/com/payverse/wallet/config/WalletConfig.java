@@ -39,6 +39,11 @@ public class WalletConfig {
         return serviceClient(builder, serviceToken, properties.userServiceUrl(), "user-service");
     }
 
+    @Bean
+    RestClient paymentRestClient(RestClient.Builder builder, ServiceTokenInterceptor serviceToken, WalletProperties properties) {
+        return serviceClient(builder, serviceToken, properties.paymentServiceUrl(), "payment-service");
+    }
+
     /**
      * Circuit breakers for downstream calls: 3s time limit; only infrastructure failures (5xx,
      * timeouts, connection errors) count — business 4xx answers like AUTH_PIN_INCORRECT do not.

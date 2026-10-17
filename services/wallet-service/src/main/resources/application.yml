@@ -47,6 +47,7 @@ payverse:
   wallet:
     auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
     user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
+    payment-service-url: ${PAYMENT_SERVICE_URL:http://localhost:8085}
     max-transaction-amount: 100000
     lock-wait: 10s
     lock-lease: 30s

@@ -4,7 +4,7 @@ import com.payverse.common.money.Money;
 
 import java.util.UUID;
 
-/** Charges the user for "add money" ({@link MockPaymentGatewayAdapter} until payment-service exists in Phase 4). */
+/** Charges the user for "add money" (implemented by {@code PaymentServiceGateway} → payment-service). */
 public interface PaymentGateway {
 
     sealed interface ChargeResult {
