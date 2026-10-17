@@ -67,7 +67,7 @@ public class MoneyRequestController {
     @PostMapping("/{id}/pay")
     public ResponseEntity<TransferResponse> pay(@PathVariable UUID id, @RequestHeader(IdempotencyService.HEADER) String idempotencyKey,
                                                 @RequestHeader(value = "X-Txn-Pin", required = false) String pin, AuthenticatedUser user) {
-        TransferService.TransferResult result = requests.pay(user.userId(), id, pin, idempotencyKey);
+        TransferService.TransferResult result = requests.pay(user.userId(), id, pin, idempotencyKey, user.deviceId());
         return TransferController.respond(result, mapper.toTransfer(result.transaction()));
     }
 

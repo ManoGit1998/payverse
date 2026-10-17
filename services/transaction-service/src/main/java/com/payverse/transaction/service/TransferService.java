@@ -37,7 +37,7 @@ public class TransferService {
     private static final Pattern VALID_KEY = Pattern.compile("[A-Za-z0-9_:.-]{8,100}");
 
     public record TransferCommand(UUID payerUserId, PayeeResolver.Target payee, Money amount, String note, TransferSource source,
-                                  UUID sourceId, String pin, String idempotencyKey) {
+                                  UUID sourceId, String pin, String idempotencyKey, String deviceId) {
 
         @Override
         public String toString() {
@@ -94,7 +94,8 @@ public class TransferService {
         try {
             created = tx.execute(status -> {
                 Transaction txn = transactions.saveAndFlush(Transaction.initiate(command.payerUserId(), payerRef, resolution.payee(),
-                        resolution.amount(), command.note(), command.source(), command.sourceId(), key, hash, clock.instant()));
+                        resolution.amount(), command.note(), command.source(), command.sourceId(), key, hash, clock.instant())
+                        .fromDevice(command.deviceId()));
                 history.save(TransactionStatusHistory.created(txn));
                 events.initiated(txn);
                 return txn;

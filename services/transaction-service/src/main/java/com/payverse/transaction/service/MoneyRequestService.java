@@ -69,7 +69,7 @@ public class MoneyRequestService {
     }
 
     /** Pays the request with a normal transfer; the saga marks it PAID when the money lands. */
-    public TransferService.TransferResult pay(UUID payerUserId, UUID requestId, String pin, String idempotencyKey) {
+    public TransferService.TransferResult pay(UUID payerUserId, UUID requestId, String pin, String idempotencyKey, String deviceId) {
         MoneyRequest request = tx.execute(status -> {
             MoneyRequest r = requests.findById(requestId).filter(m -> m.getPayerUserId().equals(payerUserId))
                     .orElseThrow(() -> new PayverseException(TransactionErrorCode.TXN_MONEY_REQUEST_NOT_FOUND, null));
@@ -78,7 +78,8 @@ public class MoneyRequestService {
         });
         TransferService.TransferResult result = transferService.transfer(new TransferService.TransferCommand(payerUserId,
                 new PayeeResolver.Target(PayeeType.USER, request.getRequesterUserId().toString(), request.getRequesterRef()),
-                request.getAmountMoney(), request.getNote(), TransferSource.MONEY_REQUEST, request.getId(), pin, idempotencyKey));
+                request.getAmountMoney(), request.getNote(), TransferSource.MONEY_REQUEST, request.getId(), pin, idempotencyKey,
+                deviceId));
         tx.executeWithoutResult(status -> requests.findById(requestId).ifPresent(r -> {
             if (r.getTransactionId() == null) {
                 r.attachTransaction(result.transaction().getId(), clock.instant());

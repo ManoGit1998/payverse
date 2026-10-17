@@ -87,10 +87,16 @@ public class TransferSaga {
         if (t.getStatus() == TransactionStatus.INITIATED) {
             RiskAssessor.Assessment assessment = risk.assess(t);
             if (assessment.decision() == RiskAssessor.Decision.BLOCK) {
-                update(t.getId(), txn -> txn.fail(TransactionErrorCode.TXN_RISK_BLOCKED.code(), String.join("; ", assessment.reasons()), now()));
+                update(t.getId(), txn -> {
+                    txn.recordRisk(assessment.score(), assessment.decision().name());
+                    return txn.fail(TransactionErrorCode.TXN_RISK_BLOCKED.code(), String.join("; ", assessment.reasons()), now());
+                });
                 return false;
             }
-            update(t.getId(), txn -> txn.markPending(now()));
+            update(t.getId(), txn -> {
+                txn.recordRisk(assessment.score(), assessment.decision().name());
+                return txn.markPending(now());
+            });
             return true;
         }
         if (t.getStatus() != TransactionStatus.PENDING) {

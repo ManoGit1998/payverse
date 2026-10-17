@@ -49,7 +49,7 @@ public class TransferController {
         TransferService.TransferResult result = transfers.transfer(new TransferService.TransferCommand(user.userId(),
                 new PayeeResolver.Target(request.payee().type(), request.payee().value(), null),
                 request.amount() == null ? null : Money.inr(request.amount()), request.note(), TransferSource.DIRECT, null, pin,
-                idempotencyKey));
+                idempotencyKey, user.deviceId()));
         return respond(result, mapper.toTransfer(result.transaction()));
     }
 

@@ -64,7 +64,7 @@ class TransactionServiceIT {
 
     @DynamicPropertySource
     static void downstream(DynamicPropertyRegistry registry) {
-        for (String svc : List.of("wallet", "auth", "payment", "user")) {
+        for (String svc : List.of("wallet", "auth", "payment", "user", "fraud")) {
             registry.add("payverse.transaction." + svc + "-service-url", DOWNSTREAM::baseUrl);
         }
         registry.add("payverse.service-client.token-uri", () -> DOWNSTREAM.baseUrl() + "/api/v1/auth/oauth/token");
@@ -108,6 +108,8 @@ class TransactionServiceIT {
                 "{\"fullName\":\"Asha Verma\",\"kycTier\":\"MIN_KYC\",\"mobileMasked\":\"******3210\"}")));
         DOWNSTREAM.stubFor(WireMock.get(vpaPath(payeeVpa)).willReturn(okJson(
                 "{\"vpa\":\"" + payeeVpa + "\",\"userId\":\"" + payee + "\",\"payeeName\":\"Ravi Kumar\"}")));
+        DOWNSTREAM.stubFor(WireMock.post("/internal/risk/assess").willReturn(okJson(
+                "{\"assessmentId\":\"" + UUID.randomUUID() + "\",\"score\":10,\"decision\":\"ALLOW\",\"reasons\":[]}")));
         stubWallet("debit", 201);
         stubWallet("credit", 201);
         stubWallet("reverse", 201);
@@ -183,6 +185,37 @@ class TransactionServiceIT {
                 .andExpect(jsonPath("$.transaction.counterparty").value("Asha Verma (******3210)"));
         mvc.perform(get("/api/v1/transactions/" + txn).header(HttpHeaders.AUTHORIZATION, bearer(UUID.randomUUID())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void riskBlockStopsTheTransferBeforeAnyMoneyMoves() throws Exception {
+        DOWNSTREAM.stubFor(WireMock.post("/internal/risk/assess").atPriority(1)
+                .withRequestBody(matchingJsonPath("$.userId", equalTo(payer.toString())))
+                .willReturn(okJson("{\"assessmentId\":\"" + UUID.randomUUID() + "\",\"score\":90,\"decision\":\"BLOCK\","
+                        + "\"reasons\":[\"VELOCITY_COUNT\",\"NEW_DEVICE\"]}")));
+        String body = send(payer, UUID.randomUUID().toString(), "4826", toVpa("500")).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureCode").value("TXN_RISK_BLOCKED"))
+                .andReturn().getResponse().getContentAsString();
+        UUID txn = UUID.fromString(JsonPath.read(body, "$.transactionId"));
+        assertThat(walletCalls("debit", txn)).isZero();
+        DOWNSTREAM.verify(postRequestedFor(urlEqualTo("/internal/risk/assess"))
+                .withRequestBody(matchingJsonPath("$.transactionId", equalTo(txn.toString())))
+                .withRequestBody(matchingJsonPath("$.deviceId", equalTo("test-device"))));
+        assertThat(jdbc.queryForObject("SELECT risk_decision || ':' || risk_score FROM transactions WHERE id = ?", String.class, txn))
+                .isEqualTo("BLOCK:90");
+    }
+
+    @Test
+    void unreachableRiskServiceFailsOpenForSmallAndClosedForLargeAmounts() throws Exception {
+        DOWNSTREAM.stubFor(WireMock.post("/internal/risk/assess").atPriority(1)
+                .withRequestBody(matchingJsonPath("$.userId", equalTo(payer.toString())))
+                .willReturn(aResponse().withStatus(503)));
+        send(payer, UUID.randomUUID().toString(), "4826", toVpa("2000")).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("SUCCESS"));
+        send(payer, UUID.randomUUID().toString(), "4826", toVpa("2000.01")).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureCode").value("TXN_RISK_BLOCKED"));
     }
 
     @Test

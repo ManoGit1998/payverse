@@ -49,6 +49,9 @@ payverse:
     auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
     payment-service-url: ${PAYMENT_SERVICE_URL:http://localhost:8085}
     user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
+    fraud-service-url: ${FRAUD_SERVICE_URL:http://localhost:8089}
+    risk-assessor: ${RISK_ASSESSOR:remote}   # remote (fraud-risk-service) | permissive (MOCK allow-all)
+    risk-fail-open-max: 2000.00      # fraud-risk-service down: allow up to this amount, block above
     recovery-interval-ms: 10000      # saga recovery job
     stale-after: 60s                 # unfinished sagas with no scheduled retry are resumed after this
     max-split-participants: 20

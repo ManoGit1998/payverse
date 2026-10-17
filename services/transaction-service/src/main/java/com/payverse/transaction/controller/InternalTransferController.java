@@ -39,7 +39,8 @@ public class InternalTransferController {
                                                     @Valid @RequestBody InternalTransferRequest request) {
         TransferService.TransferResult result = transfers.transfer(new TransferService.TransferCommand(request.payerUserId(),
                 new PayeeResolver.Target(PayeeType.USER, request.payeeUserId().toString(), request.payeeRef()),
-                Money.inr(request.amount()), request.note(), request.source(), request.sourceId(), pin, idempotencyKey));
+                Money.inr(request.amount()), request.note(), request.source(), request.sourceId(), pin, idempotencyKey,
+                null));
         return TransferController.respond(result, mapper.toOutcome(result.transaction()));
     }
 }

@@ -119,6 +119,15 @@ public class Transaction {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "device_id")
+    private String deviceId;
+
+    @Column(name = "risk_score")
+    private Integer riskScore;
+
+    @Column(name = "risk_decision")
+    private String riskDecision;
+
     @Column(name = "completed_at")
     private Instant completedAt;
 
@@ -178,6 +187,17 @@ public class Transaction {
             nextAttemptAt = null;
         }
         return new StatusChange(id, previous, next, reason, now);
+    }
+
+    /** The device the payer used (from the access token), for the fraud new-device rule. */
+    public Transaction fromDevice(String device) {
+        deviceId = device;
+        return this;
+    }
+
+    public void recordRisk(int score, String decision) {
+        riskScore = score;
+        riskDecision = decision;
     }
 
     public StatusChange markPending(Instant now) {

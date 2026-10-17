@@ -45,6 +45,11 @@ public class TransactionConfig {
     }
 
     @Bean
+    RestClient fraudRestClient(RestClient.Builder builder, ServiceTokenInterceptor serviceToken, TransactionProperties properties) {
+        return serviceClient(builder, serviceToken, properties.fraudServiceUrl(), "fraud-risk-service");
+    }
+
+    @Bean
     RestClient userRestClient(RestClient.Builder builder, ServiceTokenInterceptor serviceToken, TransactionProperties properties) {
         return serviceClient(builder, serviceToken, properties.userServiceUrl(), "user-service");
     }
