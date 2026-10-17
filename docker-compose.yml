@@ -236,7 +236,21 @@ services:
     image: payverse/notification-service:local
     ports: ["8088:8088"]
 
-  # reconciliation and admin (extras) come in Phase 7.
+  reconciliation-service:
+    <<: *service-defaults
+    profiles: [extras]
+    build:
+      context: ./services/reconciliation-service
+    image: payverse/reconciliation-service:local
+    ports: ["8090:8090"]
+
+  admin-service:
+    <<: *service-defaults
+    profiles: [extras]
+    build:
+      context: ./services/admin-service
+    image: payverse/admin-service:local
+    ports: ["8091:8091"]
 
 volumes:
   postgres-data:

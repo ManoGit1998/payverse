@@ -34,7 +34,7 @@ service exposed to clients. Port **8080**.
 | `/api/v1/notifications/**`, `/api/v1/admin/templates/**`, `/admin/notifications/**`, `/admin/dead-letters/**` | notification-service |
 | `/api/v1/admin/risk/**` | fraud-risk-service |
 | `/api/v1/admin/recon/**` | reconciliation-service |
-| `/api/v1/admin/**` | admin-service |
+| `/api/v1/admin/**`, `/api/v1/disputes/**` | admin-service |
 
 ## Run
 

@@ -37,6 +37,7 @@
         <module>services/fraud-risk-service</module>
         <module>services/bill-payment-service</module>
         <module>services/reconciliation-service</module>
+        <module>services/admin-service</module>
     </modules>
 
     <properties>

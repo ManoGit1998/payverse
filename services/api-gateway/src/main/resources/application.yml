@@ -192,7 +192,7 @@ spring:
           - id: admin
             uri: ${payverse.services.admin}
             predicates:
-              - Path=/api/v1/admin/**
+              - Path=/api/v1/admin/**,/api/v1/disputes/**
             filters:
               - name: RequestRateLimiter
                 args:
