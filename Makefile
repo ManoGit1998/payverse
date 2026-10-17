@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 MVN        := ./mvnw -B
 COMPOSE    := docker compose
-JVM_ARGS   := -Xms128m -Xmx256m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC
+JVM_ARGS   := -Xms128m -Xmx256m -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC
 export MALLOC_ARENA_MAX := 2
 SERVICES   := api-gateway auth-service user-service wallet-service transaction-service payment-service \
               bill-payment-service rewards-service notification-service fraud-risk-service \
@@ -138,6 +138,13 @@ e2e: ## Whole stack in Docker (12 services) + end-to-end scenario: sign up, add 
 .PHONY: e2e-local
 e2e-local: ## End-to-end scenario against services already running from source (make run-*)
 	OTP_SOURCE=file python3 e2e/e2e.py
+
+.PHONY: load
+load: ## k6 load test through the gateway (seeds users first; RATE, BROWSE_RATE, DURATION, USERS)
+	python3 load-tests/seed.py --users $${USERS:-20}
+	@mkdir -p load-tests/results
+	docker run --rm -i --add-host=host.docker.internal:host-gateway -v $(CURDIR)/load-tests:/scripts -w /scripts \
+		-e BASE_URL -e RATE -e BROWSE_RATE -e DURATION grafana/k6:1.2.3 run --summary-export=results/summary.json payverse.js
 
 .PHONY: down
 down: ## Stop the service containers (infra keeps running)

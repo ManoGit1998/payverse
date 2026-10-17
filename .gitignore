@@ -7,3 +7,5 @@ target/
 .run/
 *.log
 !.mvn/wrapper/maven-wrapper.properties
+load-tests/.users.json
+load-tests/results/
