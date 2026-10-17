@@ -203,6 +203,22 @@ services:
     image: payverse/payment-service:local
     ports: ["8085:8085"]
 
+  bill-payment-service:
+    <<: *service-defaults
+    profiles: [payments]
+    build:
+      context: ./services/bill-payment-service
+    image: payverse/bill-payment-service:local
+    ports: ["8086:8086"]
+
+  fraud-risk-service:
+    <<: *service-defaults
+    profiles: [payments]
+    build:
+      context: ./services/fraud-risk-service
+    image: payverse/fraud-risk-service:local
+    ports: ["8089:8089"]
+
   # ---------------------------------------------------------------- extras
   rewards-service:
     <<: *service-defaults
@@ -220,7 +236,7 @@ services:
     image: payverse/notification-service:local
     ports: ["8088:8088"]
 
-  # fraud-risk / bill-payment (payments), reconciliation and admin (extras) come in Phases 6–7.
+  # reconciliation and admin (extras) come in Phase 7.
 
 volumes:
   postgres-data:

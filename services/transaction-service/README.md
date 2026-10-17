@@ -14,7 +14,7 @@ com.payverse.transaction
 ├── repository  Spring Data repositories (history via JPA Specifications)
 ├── service     TransferService, TransferSaga, SagaRecoveryJob, SagaLock, PayeeResolver, MoneyRequestService, SplitBillService,
 │               TransactionQueryService, StatementService (CSV/PDF), TransactionEventPublisher,
-│               RiskAssessor + PermissiveRiskAssessor (MOCK until fraud-risk-service, Phase 6)
+│               RiskAssessor → RemoteRiskAssessor (fraud-risk-service; PermissiveRiskAssessor MOCK via RISK_ASSESSOR=permissive)
 ├── client      WalletClient (saga steps), AuthClient (PIN, mobile lookup), PaymentClient (VPA, QR), UserClient (names)
 ├── mapper      TransactionMapper (MapStruct, viewer-relative views)
 └── exception   TransactionErrorCode
@@ -90,6 +90,11 @@ Statements show counterparties masked; CSV cells are escaped against formula inj
 `transaction.reversed` arrives with refunds in Phase 7.
 
 ## Error codes
+
+**Risk check (Phase 6):** before the debit, `RemoteRiskAssessor` sends the transfer (with the payer's
+device ID from the access token) to fraud-risk-service. BLOCK → FAILED `TXN_RISK_BLOCKED`; the score and
+decision are stored on the transaction (`risk_score`, `risk_decision`). If fraud-risk-service is
+unreachable, transfers up to INR 2,000 (`risk-fail-open-max`) are allowed and larger ones blocked.
 
 `TXN_INVALID_AMOUNT`, `TXN_INVALID_PAYEE`, `TXN_PIN_REQUIRED`, `TXN_INVALID_SPLIT`, `TXN_RISK_BLOCKED`, `TXN_NOT_FOUND`,
 `TXN_MONEY_REQUEST_NOT_FOUND`, `TXN_SPLIT_NOT_FOUND`, `TXN_ILLEGAL_STATE`, `TXN_MONEY_REQUEST_NOT_PENDING`,

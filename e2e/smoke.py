@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 PayVerse smoke test against locally running services (make run-<service> for auth, user, wallet,
-payment, transaction and api-gateway, plus rewards and notification for the Phase 5 part; infra via
-make infra-up). Python 3 standard library only.
+payment, transaction, bill-payment, fraud-risk and api-gateway, plus rewards and notification for the
+Phase 5 part; infra via make infra-up). Python 3 standard library only.
 
 Two users sign up (OTP read from .run/auth-service.log — the MOCK SMS sender), set a PIN and pass
 min KYC; then: add money, pay by UPI ID / mobile / dynamic QR, a money request, a UPI collect,
@@ -107,6 +107,27 @@ print("9. pay external UPI ID:", s, r["code"])
 s, r = call("POST", "/api/v1/transfers", a["token"], {"payee": {"type": "VPA", "value": b["vpa"]}, "amount": 10}, {"Idempotency-Key": str(uuid.uuid4()), "X-Txn-Pin": "1111"})
 print("10. wrong PIN:", s, r["code"], "remaining", r.get("remainingAttempts"))
 
+# Phase 6: bills (recharge + a declined one that is refunded) and a risk BLOCK from a new device
+bill_cashback = 0.0
+s, r = call("POST", "/api/v1/bills/pay", a["token"], {"billerCode": "VOLTEL_PREPAID", "accountRef": "9876543210", "amount": 299},
+            {"Idempotency-Key": str(uuid.uuid4()), "X-Txn-Pin": "4826"})
+s2, d = call("POST", "/api/v1/bills/pay", a["token"], {"billerCode": "VOLTEL_PREPAID", "accountRef": "9876543210", "amount": 199.13},
+             {"Idempotency-Key": str(uuid.uuid4()), "X-Txn-Pin": "4826"})
+print("B1. A recharges 299:", s, r["status"], r["billerRef"], "| 199.13:", s2, d["status"], d["failureCode"], "refunded:", d["refunded"])
+assert r["status"] == "SUCCESS" and d["status"] == "FAILED" and d["refunded"]
+bill_cashback = 2.99  # BILL_PAY_1PCT: 1% of 299
+otp_mobile = a["mobile"]
+call("POST", "/api/v1/auth/otp/request", body={"mobile": otp_mobile}, base=AUTH)
+s, login = call("POST", "/api/v1/auth/otp/verify", body={"mobile": otp_mobile, "otp": otp_for("******" + otp_mobile[6:]),
+                                                         "deviceId": "e2e-Asha-new-phone", "deviceName": "New phone"}, base=AUTH)
+a_new = dict(a, token=login["accessToken"])
+time.sleep(3)  # fraud-risk-service learns the new device from auth.new-device-login
+before = balance(a)
+s, r = pay(a_new, {"type": "VPA", "value": b["vpa"]}, 2500)
+print("F1. A→B 2500 from a new phone after a burst of transfers:", s, r["status"], r["failureCode"], "| balance unchanged:",
+      before == balance(a))
+assert r["status"] == "FAILED" and r["failureCode"] == "TXN_RISK_BLOCKED"
+
 def wait_for(check, what, tries=60):
     for _ in range(tries):
         value = check()
@@ -138,7 +159,7 @@ if rewards_up:
     code = call("GET", "/api/v1/rewards/referral", a["token"])[1]["code"]
     c = signup("Meera", code, AUTH)
     wait_for(lambda: credited(c) >= 50, "referee bonus")
-    cashback_a, cashback_b = 25 + won + 100, 10.0
+    cashback_a, cashback_b = 25 + won + 100 + bill_cashback, 10.0
     wait_for(lambda: abs(credited(a) - cashback_a) < 0.001 and credited(b) >= 10, "cashback credits")
     print(f"R3. C signed up with A's code {code} + KYC: A +100, C +50 | A cashback total {credited(a):.2f}")
     inbox = wait_for(lambda: (lambda r: r if r["items"] else None)(call("GET", "/api/v1/notifications/me?size=50", b["token"])[1]),
@@ -147,11 +168,13 @@ if rewards_up:
     assert "PAYMENT_RECEIVED/PUSH" in bodies, bodies
     a_inbox = call("GET", "/api/v1/notifications/me?size=100", a["token"])[1]
     a_codes = {n["templateCode"] for n in a_inbox["items"]}
-    assert {"PAYMENT_SENT", "SCRATCH_CARD_WON", "CASHBACK_CREDITED", "MONEY_ADDED"} <= a_codes, a_codes
+    a_codes = wait_for(lambda: (lambda c: c if {"PAYMENT_BLOCKED", "BILL_PAID", "BILL_PAYMENT_FAILED"} <= c else None)(
+        {n["templateCode"] for n in call("GET", "/api/v1/notifications/me?size=100", a["token"])[1]["items"]}), "A notifications")
+    assert {"PAYMENT_SENT", "SCRATCH_CARD_WON", "CASHBACK_CREDITED", "MONEY_ADDED", "NEW_DEVICE_LOGIN"} <= a_codes, a_codes
     print("R4. notifications: B", inbox["unread"], "unread; A got", sorted(a_codes))
 
 ba, bb = balance(a), balance(b)
-expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1 + cashback_a
+expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1 - 299 + cashback_a
 expected_b = 1200.50 + 300 + 149.50 + 250 + 99.99 + 50 + 1 + cashback_b
 print(f"11. balances A={ba} (expected {expected_a:.2f})  B={bb} (expected {expected_b:.2f})")
 assert ba == f"{expected_a:.2f}" and bb == f"{expected_b:.2f}"

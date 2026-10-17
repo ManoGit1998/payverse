@@ -13,8 +13,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ✅ done 2026-10-14 |
 | 4 | transaction-service + payment-service (saga, UPI sim, QR) | ✅ done 2026-10-17 |
 | 5 | notification-service + rewards-service | ✅ done 2026-10-17 |
-| 6 | bill-payment-service + fraud-risk-service | ⏳ next |
-| 7 | reconciliation-service + admin-service | |
+| 6 | bill-payment-service + fraud-risk-service | ✅ done 2026-10-17 |
+| 7 | reconciliation-service + admin-service | ⏳ next |
 | 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | |
 
 Workflow per phase: build → `./mvnw verify` green → update this file → small commits → summarize
@@ -128,6 +128,27 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - New event `rewards.scratch-card-issued` (→ notification SCRATCH_CARD_WON).
 - WireMock `matchingJsonPath("$.amount", equalTo("1.00"))` fails for numeric JSON (read as 1.0): use a filter
   expression `$[?(@.amount == 1.00)]`.
+
+## Phase 6 decisions
+
+- fraud-risk-service: score = sum of weights of triggered rules (cap 100), `RiskModel` may only raise it (MOCK
+  `NoopRiskModel`, version `rules-v1`). ALLOW < 50 ≤ REVIEW < 80 ≤ BLOCK. Rule logic = `RiskRule` beans; weights/thresholds
+  = `risk_rules` rows (typed columns, admin-tunable). One assessment per transaction (`UNIQUE(transaction_id)`).
+  REVIEW/BLOCK → flag + `fraud.transaction-flagged`. Velocity = Redis ZSET per user (`<txnId>|<amount>`, recorded at
+  assessment, idempotent). Signals from events: `known_devices` (new-device-login only — the registration device is
+  never "new"), `user_risk_profiles` (completed transfers as payer, last PIN lock).
+- transaction-service: `RemoteRiskAssessor` is the default (`RISK_ASSESSOR=permissive` for the MOCK). Fail-open up to
+  `risk-fail-open-max` (2000) when fraud is down, fail-closed above. `transactions.device_id` (from the JWT) + `risk_score`/
+  `risk_decision` (V2). Collect approvals have no device (null).
+- Confirming fraud can freeze the wallet (ADMIN only); the remote freeze runs before the flag is resolved, so a failed
+  freeze leaves the flag OPEN.
+- bill-payment-service: same saga style as transfers (debit `<id>:debit` → biller (idempotent per payment id) → SUCCESS, or
+  declined → refund `<id>:refund` → FAILED). Recovery job resumes due/stale PENDING payments; `@Version` stops concurrent
+  runners. Account refs encrypted + masked. `MockBillerAdapter`: `0000` unknown account, `.13` decline, `.14` one timeout.
+- Mandates: PIN at creation is the consent; runs claimed under a row lock with `UNIQUE(mandate_id, scheduled_for)` and paid
+  with key `mandate:<id>:<yyyyMMddHHmm UTC>`; bills above `maxAmount` are SKIPPED. Monthly in IST calendar terms.
+- Notifications: BILL_PAID, BILL_PAYMENT_FAILED, AUTOPAY_FAILED (failed/skipped runs), PAYMENT_BLOCKED (BLOCK only).
+- A `@Configuration` class and one of its `@Bean` methods must not share a name (`noopRiskModel` → BeanDefinitionOverrideException).
 
 ## Conventions
 

@@ -410,6 +410,12 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
   `rewards.scratch-card-issued`. The platform dead-letter desk (capture + replay of every `.dlt`) lives in
   notification-service.
 
+- Phase 6: risk rule params are typed columns (not `params jsonb`); `user_risk_profiles` and `known_devices` hold
+  event-fed signals; velocity is recorded at assessment time (not from `transaction.initiated`). Fail-open for small
+  transfers when fraud-risk-service is down. `billers.fields jsonb` became `account_label` + `account_pattern` +
+  `fetch_supported`; bill payments are not `transactions` rows (bill-payment-service owns them). Mandate runs are
+  recorded in `mandate_executions`.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?

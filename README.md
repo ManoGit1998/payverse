@@ -4,7 +4,7 @@ A PhonePe-style digital wallet and payments platform: Java 21, Spring Boot 4.1 m
 PostgreSQL, Redis, Kafka (KRaft) and OpenTelemetry. **No real money moves.** Every external
 integration (UPI switch, payment gateway, billers, SMS/e-mail) is a clearly named mock.
 
-> Status: **Phase 5 — notification-service + rewards-service complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
+> Status: **Phase 6 — bill-payment-service + fraud-risk-service complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
 > [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full architecture, event catalog and DB schemas.
 
 ## Architecture
@@ -61,7 +61,8 @@ flowchart LR
 | `services/payment-service` | VPAs, collect requests, static/dynamic QR (ZXing), MOCK UPI switch, MOCK payment gateway | ✅ |
 | `services/notification-service` | SMS / e-mail / push via MOCK providers, DB templates, retries → DEAD, inbox, platform dead-letter desk with replay | ✅ |
 | `services/rewards-service` | Cashback rules engine (budgets, caps, first-time), scratch cards, coupons, referral bonuses, clawback | ✅ |
-| bill-payment, fraud-risk | Phase 6 | ⏳ |
+| `services/bill-payment-service` | Recharges and bills via MOCK billers (fetch, pay, refund on decline), auto-pay mandates | ✅ |
+| `services/fraud-risk-service` | Rule-based risk scoring (velocity, amount anomaly, new device, PIN lock), review flags, ML-ready model port | ✅ |
 | reconciliation, admin | Phase 7 | ⏳ |
 
 ## Prerequisites
@@ -82,7 +83,9 @@ make run-user-service    # :8082
 make run-wallet-service  # :8083
 make run-payment-service # :8085
 make run-transaction-service # :8084
+make run-bill-payment-service # :8086
 make run-rewards-service # :8087
+make run-fraud-risk-service # :8089
 make run-notification-service # :8088
 make smoke               # live two-user scenario through the gateway
 make run-api-gateway     # :8080
@@ -92,7 +95,7 @@ make otp                 # read the MOCK OTP after requesting one
 Then open [http/01-auth.http](http/01-auth.http), [http/02-user.http](http/02-user.http) and
 [http/03-wallet.http](http/03-wallet.http), [http/04-transactions.http](http/04-transactions.http) and
 [http/05-payments.http](http/05-payments.http), [http/06-notifications.http](http/06-notifications.http) and
-[http/07-rewards.http](http/07-rewards.http) in IntelliJ or
+[http/07-rewards.http](http/07-rewards.http), [http/08-bills.http](http/08-bills.http), [http/09-risk.http](http/09-risk.http) in IntelliJ or
 VS Code (REST Client) and run the requests with the `local` environment.
 
 > Postgres from Docker is published on **localhost:5433** (`POSTGRES_PORT`), because a native Postgres

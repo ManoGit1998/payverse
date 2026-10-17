@@ -1,0 +1,37 @@
+### PayVerse — fraud-risk-service admin API through the gateway (ADMIN or SUPPORT; tuning and wallet freezes are ADMIN).
+### Every transfer is scored by transaction-service → POST /internal/risk/assess before money moves.
+
+### Open flags (REVIEW = allowed but flagged, BLOCK = stopped)
+GET {{gateway}}/api/v1/admin/risk/flags?status=OPEN
+Authorization: Bearer {{adminToken}}
+
+> {% if (response.body.items.length > 0) client.global.set("flagId", response.body.items[0].id); %}
+
+### Resolve as a false positive
+POST {{gateway}}/api/v1/admin/risk/flags/{{flagId}}/resolve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "resolution": "FALSE_POSITIVE", "note": "Customer confirmed on call" }
+
+### …or confirm fraud and freeze the wallet (ADMIN)
+POST {{gateway}}/api/v1/admin/risk/flags/{{flagId}}/resolve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "resolution": "CONFIRMED_FRAUD", "note": "Account takeover", "freezeWallet": true }
+
+### Rules, weights and thresholds
+GET {{gateway}}/api/v1/admin/risk/rules
+Authorization: Bearer {{adminToken}}
+
+### Tune a rule (ADMIN): e.g. velocity = more than 3 transfers in 5 minutes
+PUT {{gateway}}/api/v1/admin/risk/rules/VELOCITY_COUNT
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "weight": 40, "enabled": true, "thresholdCount": 3, "windowSeconds": 300 }
+
+### Recent assessments (optionally ?userId=…)
+GET {{gateway}}/api/v1/admin/risk/assessments
+Authorization: Bearer {{adminToken}}
