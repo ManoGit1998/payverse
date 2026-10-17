@@ -91,6 +91,12 @@ Statements show counterparties masked; CSV cells are escaped against formula inj
 
 ## Error codes
 
+**Refunds (Phase 7):** admin-service (maker-checker) calls `POST /internal/transactions/{id}/refund
+{refundId, reason}`. The payee's credit journal is reversed first (`refund:<id>:payee`), then the payer's
+debit journal (`refund:<id>:payer`); then SUCCESS → REVERSED and `transaction.reversed`. If the payee has
+already spent the money the refund FAILS and nothing moves. Idempotent per refund id: 202 PENDING means
+"call again". Reconciliation feeds: `GET /internal/transactions/{id}` and `GET /internal/transactions?status&from&to`.
+
 **Risk check (Phase 6):** before the debit, `RemoteRiskAssessor` sends the transfer (with the payer's
 device ID from the access token) to fraud-risk-service. BLOCK → FAILED `TXN_RISK_BLOCKED`; the score and
 decision are stored on the transaction (`risk_score`, `risk_decision`). If fraud-risk-service is

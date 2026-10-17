@@ -1,0 +1,61 @@
+### PayVerse — admin-service through the gateway. adminToken = a login with a mobile in ADMIN_MOBILES,
+### supportToken = one in SUPPORT_MOBILES (01-auth.http). Maker-checker needs two different people.
+
+### Find a user by mobile, or by name / KYC tier
+GET {{gateway}}/api/v1/admin/users?mobile={{payeeMobile}}
+Authorization: Bearer {{supportToken}}
+
+> {% if (response.body.length > 0) client.global.set("adminUserId", response.body[0].userId); %}
+
+###
+GET {{gateway}}/api/v1/admin/users?name=asha&kycTier=MIN_KYC
+Authorization: Bearer {{supportToken}}
+
+### Freeze / unfreeze the wallet (ADMIN)
+POST {{gateway}}/api/v1/admin/wallets/{{adminUserId}}/freeze
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "note": "Suspicious activity reported by the user" }
+
+###
+POST {{gateway}}/api/v1/admin/wallets/{{adminUserId}}/unfreeze
+Authorization: Bearer {{adminToken}}
+
+### A user disputes one of their transfers (user token)
+POST {{gateway}}/api/v1/disputes
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "transactionId": "{{transactionId}}", "reason": "I paid the wrong person" }
+
+> {% client.global.set("disputeId", response.body.id); %}
+
+### Support picks it up and resolves with a refund (support = maker)
+POST {{gateway}}/api/v1/admin/disputes/{{disputeId}}/assign
+Authorization: Bearer {{supportToken}}
+
+###
+POST {{gateway}}/api/v1/admin/disputes/{{disputeId}}/resolve
+Authorization: Bearer {{supportToken}}
+Content-Type: application/json
+
+{ "outcome": "REFUND", "note": "Payee confirmed the mistake" }
+
+> {% client.global.set("refundId", response.body.refundId); %}
+
+### An ADMIN approves (checker) — the transfer is reversed
+POST {{gateway}}/api/v1/admin/refunds/{{refundId}}/approve
+Authorization: Bearer {{adminToken}}
+
+### Refund requests waiting for a checker
+GET {{gateway}}/api/v1/admin/refunds?status=REQUESTED
+Authorization: Bearer {{adminToken}}
+
+### Audit trail of a dispute
+GET {{gateway}}/api/v1/admin/audit-logs?entityId={{disputeId}}
+Authorization: Bearer {{adminToken}}
+
+### Rotate the JWT signing key (ADMIN)
+POST {{gateway}}/api/v1/admin/security/signing-keys/rotate
+Authorization: Bearer {{adminToken}}

@@ -1,0 +1,36 @@
+### PayVerse — reconciliation-service through the gateway (ADMIN runs jobs and resolves; SUPPORT reads).
+
+### Run PG charges vs ledger for today (IST); returns the RUNNING run — poll it
+POST {{gateway}}/api/v1/admin/recon/jobs/PG_VS_LEDGER/run
+Authorization: Bearer {{adminToken}}
+
+> {% client.global.set("runId", response.body.id); %}
+
+### Other jobs: TRANSFERS_VS_UPI, WALLET_INTEGRITY; any past day with ?date=2026-10-16
+POST {{gateway}}/api/v1/admin/recon/jobs/TRANSFERS_VS_UPI/run?date=2026-10-16
+Authorization: Bearer {{adminToken}}
+
+### The run (counts and status)
+GET {{gateway}}/api/v1/admin/recon/runs/{{runId}}
+Authorization: Bearer {{adminToken}}
+
+### Its mismatches
+GET {{gateway}}/api/v1/admin/recon/runs/{{runId}}/mismatches
+Authorization: Bearer {{adminToken}}
+
+### Recent runs
+GET {{gateway}}/api/v1/admin/recon/runs?job=PG_VS_LEDGER
+Authorization: Bearer {{adminToken}}
+
+### Open mismatches across runs
+GET {{gateway}}/api/v1/admin/recon/mismatches
+Authorization: Bearer {{adminToken}}
+
+> {% if (response.body.items.length > 0) client.global.set("mismatchId", response.body.items[0].id); %}
+
+### Resolve one with an explanation (ADMIN)
+POST {{gateway}}/api/v1/admin/recon/mismatches/{{mismatchId}}/resolve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "note": "Charge refunded at the gateway (ticket OPS-123)" }

@@ -14,8 +14,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 4 | transaction-service + payment-service (saga, UPI sim, QR) | ✅ done 2026-10-17 |
 | 5 | notification-service + rewards-service | ✅ done 2026-10-17 |
 | 6 | bill-payment-service + fraud-risk-service | ✅ done 2026-10-17 |
-| 7 | reconciliation-service + admin-service | ⏳ next |
-| 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | |
+| 7 | reconciliation-service + admin-service | ✅ done 2026-10-17 |
+| 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | ⏳ next |
 
 Workflow per phase: build → `./mvnw verify` green → update this file → small commits → summarize
 with run/test steps → wait for the user to say "continue".
@@ -150,6 +150,28 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - Notifications: BILL_PAID, BILL_PAYMENT_FAILED, AUTOPAY_FAILED (failed/skipped runs), PAYMENT_BLOCKED (BLOCK only).
 - A `@Configuration` class and one of its `@Bean` methods must not share a name (`noopRiskModel` → BeanDefinitionOverrideException).
 
+## Phase 7 decisions
+
+- Refunds (transaction-service `RefundService`, `POST /internal/transactions/{id}/refund {refundId, reason}`): full refunds
+  only; reverse the payee's credit journal (`refund:<id>:payee`), then the payer's debit journal (`refund:<id>:payer`), then
+  SUCCESS → REVERSED + `transaction.reversed` (event `transactionId` = refund id, `originalTransactionId` = the transfer).
+  Payee reversal refused (spent) → refund FAILED, nothing moved, a new refund id may retry. 200 COMPLETED/FAILED, 202 PENDING
+  (caller retries). Columns `refund_*` on `transactions` (V3); `SagaLock` guards against a concurrent saga run.
+- admin-service is the only caller of refunds (maker-checker): REQUESTED → APPROVED by a different ADMIN (entity + DB check)
+  → executed; PROCESSING retried every 30 s. Approval + `admin.refund-approved` + audit are committed before the remote call.
+  Disputes (users, `/api/v1/disputes`, gateway route added) resolve as REJECTED or REFUND (creates the refund request).
+- Admin actions use the shared `audit_log`; `/api/v1/admin/audit-logs` reads admin-service's own log.
+- Signing-key rotation: `POST /internal/auth/signing-keys/rotate` (only client `admin-service`), exposed as ADMIN
+  `/api/v1/admin/security/signing-keys/rotate`; retired keys stay in the JWKS for a day.
+- Internal feeds for recon (role SERVICE, `[from, to)`, paged, max 1000): wallet `/internal/ledger/journals?type`,
+  payment `/internal/pg/charges?status` (GET; POST is the charge) and `/internal/upi/switch-records`, transaction
+  `/internal/transactions?status`. user-service `/internal/users/search?name&kycTier`.
+- reconciliation-service: Spring Batch 6 (`spring-boot-starter-batch-jdbc`); metadata tables copied into Flyway V1,
+  `spring.batch.jdbc.initialize-schema=never`, `spring.batch.job.enabled=false`. One `Job` built per run (no @StepScope);
+  `JobOperator.start` on a virtual thread. Packages moved in Batch 6: `org.springframework.batch.core.job.Job`,
+  `...core.step.Step`, `...infrastructure.item.*`; `StepBuilder.chunk(int)` → `ChunkOrientedStepBuilder` + `.transactionManager()`.
+- MockMvc `get("/path?x=a%20b")` re-encodes `%` (→ `%2520`); pass query values with `.param(...)`.
+
 ## Conventions
 
 - **Package layout (layered, requested by the user on 2026-10-14 — replaces the hexagonal layout of the brief):**
@@ -232,9 +254,8 @@ Grafana: http://localhost:3000 (admin/admin). Gateway: http://localhost:8080.
 - `make e2e` intentionally fails until Phase 8.
 - Access tokens stay valid until expiry (15m) after logout or device revocation; there is no deny-list yet.
 - No penny-drop / name-match verification when linking bank accounts (simulation).
-- `SigningKeyService.rotate()` exists but has no admin endpoint yet (admin-service, Phase 7).
-- Refunds of completed transfers (SUCCESS → REVERSED) come with admin-service in Phase 7.
+- Refunds are full refunds only; reversing a refund does not give back daily-limit usage.
 - Dynamic QRs are not single-use (they expire); a real PSP would mark them consumed.
-- Add money charges the mock gateway inside the request; if the commit failed after a successful charge, recon must
-  refund it (Phase 7). Payouts are synchronous in the mock; a real adapter should go through the outbox.
+- Add money charges the mock gateway inside the request; if the commit failed after a successful charge, the
+  PG_VS_LEDGER recon run reports CHARGED_NOT_CREDITED (refunding at the gateway is manual). Payouts are synchronous in the mock; a real adapter should go through the outbox.
 - Reversing a debit does not give back daily-limit usage (conservative).

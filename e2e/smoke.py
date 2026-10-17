@@ -74,6 +74,7 @@ print("2. A adds 5000 via payment-service PG:", s, r["status"], r["paymentRefere
 s, r = pay(a, {"type": "VPA", "value": b["vpa"]}, 1200.50, "Rent share")
 print("3. A→B by UPI ID 1200.50:", s, r["status"], "| payee name:", r["payee"]["name"])
 s, r = pay(a, {"type": "MOBILE", "value": b["mobile"]}, 300)
+mobile_txn = r["transactionId"]
 print("4. A→B by mobile 300:", s, r["status"], "| payee shown as", r["payee"]["ref"])
 s, qr = call("POST", "/api/v1/qr/dynamic", b["token"], {"amount": 149.50, "note": "Coffee", "validityMinutes": 10})
 s, r = pay(a, {"type": "QR", "value": qr["payload"]})
@@ -173,9 +174,66 @@ if rewards_up:
     assert {"PAYMENT_SENT", "SCRATCH_CARD_WON", "CASHBACK_CREDITED", "MONEY_ADDED", "NEW_DEVICE_LOGIN"} <= a_codes, a_codes
     print("R4. notifications: B", inbox["unread"], "unread; A got", sorted(a_codes))
 
+# Phase 7: A disputes the 300 sent by mobile; support resolves with a refund (maker), an admin approves (checker)
+refund_a = refund_b = clawed = 0.0
+ADMIN_URL = os.environ.get("ADMIN_SERVICE_URL", "http://localhost:8091")
+try:
+    admin_up = call("GET", "/actuator/health", base=ADMIN_URL)[0] == 200
+except OSError:
+    admin_up = False
+    print("A. admin-service is not running: skipping the Phase 7 checks")
+if admin_up:
+    def staff(mobile):
+        call("POST", "/api/v1/auth/otp/request", body={"mobile": mobile}, base=AUTH)
+        s, r = call("POST", "/api/v1/auth/otp/verify", body={"mobile": mobile, "otp": otp_for("******" + mobile[6:]),
+                                                             "deviceId": "e2e-staff-" + mobile}, base=AUTH)
+        return r["accessToken"]
+    admin_tok, support_tok = staff("9000000001"), staff("9000000002")
+    s, d = call("POST", "/api/v1/disputes", a["token"], {"transactionId": mobile_txn, "reason": "Sent to the wrong number"})
+    call("POST", f"/api/v1/admin/disputes/{d['id']}/assign", support_tok)
+    s, res = call("POST", f"/api/v1/admin/disputes/{d['id']}/resolve", support_tok, {"outcome": "REFUND", "note": "Payee confirmed"})
+    s_self, own = call("POST", f"/api/v1/admin/refunds/{res['refundId']}/approve", support_tok)
+    s, ref = call("POST", f"/api/v1/admin/refunds/{res['refundId']}/approve", admin_tok)
+    print("A1. dispute → REFUND by support; support approving:", s_self, "| admin approves:", s, ref["status"])
+    assert ref["status"] == "COMPLETED", ref
+    s, t = call("GET", f"/api/v1/transactions/{mobile_txn}", a["token"])
+    refund_a, refund_b = 300.0, 300.0
+    # rewards-service claws back the scratch-card cashback that this transfer earned
+    reward = wait_for(lambda: next((x for x in call("GET", "/api/v1/rewards/history?size=100", a["token"])[1]["items"]
+                                    if x["status"] == "CLAWED_BACK"), None), "cashback clawback")
+    clawed = float(reward["amount"]["amount"])
+    print("A2. transfer now", t["transaction"]["status"], "| cashback clawed back:", f"{clawed:.2f}")
+    audit = call("GET", f"/api/v1/admin/audit-logs?entityId={d['id']}", support_tok)[1]
+    print("A3. dispute audit trail:", [x["action"] for x in audit][::-1])
+
+    # Reconciliation for today, with one injected PG charge that never reached the wallet
+    injected = "SMOKE-" + uuid.uuid4().hex[:12].upper()
+    import subprocess
+    subprocess.run(["docker", "compose", "exec", "-T", "postgres", "psql", "-q", "-U", os.environ.get("POSTGRES_USER", "payverse"),
+                    "-d", "payment_db", "-c",
+                    f"INSERT INTO pg_orders (id, user_id, idempotency_key, amount, method, provider, status, provider_ref, created_at) "
+                    f"VALUES (gen_random_uuid(), '{a['userId']}', 'smoke:{injected}', 42.00, 'UPI', 'MOCK', 'SUCCEEDED', '{injected}', now())"],
+                   check=True, cwd=ROOT)
+    results = {}
+    for job in ("PG_VS_LEDGER", "TRANSFERS_VS_UPI", "WALLET_INTEGRITY"):
+        s, run = call("POST", f"/api/v1/admin/recon/jobs/{job}/run", admin_tok)
+        done = wait_for(lambda: (lambda r: r if r["status"] != "RUNNING" else None)(
+            call("GET", f"/api/v1/admin/recon/runs/{run['id']}", admin_tok)[1]), job)
+        mism = call("GET", f"/api/v1/admin/recon/runs/{run['id']}/mismatches", admin_tok)[1]["items"]
+        results[job] = (done, mism)
+        print(f"R-{job}: {done['status']} left={done['leftCount']} right={done['rightCount']} matched={done['matchedCount']}"
+              f" mismatches={[(m['type'], m['reference']) for m in mism]}")
+    pg_types = {(m["type"], m["reference"]) for m in results["PG_VS_LEDGER"][1]}
+    assert ("CHARGED_NOT_CREDITED", injected) in pg_types, pg_types
+    assert all(done["status"] == "COMPLETED" for done, _ in results.values())
+    assert not results["TRANSFERS_VS_UPI"][1] and not results["WALLET_INTEGRITY"][1]
+    injected_mismatch = next(m for m in results["PG_VS_LEDGER"][1] if m["reference"] == injected)
+    s, rm = call("POST", f"/api/v1/admin/recon/mismatches/{injected_mismatch['id']}/resolve", admin_tok, {"note": "smoke test injection"})
+    print("R. injected mismatch detected and resolved:", rm["status"])
+
 ba, bb = balance(a), balance(b)
-expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1 - 299 + cashback_a
-expected_b = 1200.50 + 300 + 149.50 + 250 + 99.99 + 50 + 1 + cashback_b
+expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1 - 299 + cashback_a + refund_a - clawed
+expected_b = 1200.50 + 300 + 149.50 + 250 + 99.99 + 50 + 1 + cashback_b - refund_b
 print(f"11. balances A={ba} (expected {expected_a:.2f})  B={bb} (expected {expected_b:.2f})")
 assert ba == f"{expected_a:.2f}" and bb == f"{expected_b:.2f}"
 s, integ = call("GET", "/internal/wallets/integrity", svc, base=WALLET)

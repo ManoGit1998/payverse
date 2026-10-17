@@ -416,6 +416,12 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
   `fetch_supported`; bill payments are not `transactions` rows (bill-payment-service owns them). Mandate runs are
   recorded in `mandate_executions`.
 
+- Phase 7: refunds are executed over REST (admin-service → transaction-service, idempotent per refund id, D1);
+  `admin.refund-approved` is published as a fact rather than consumed as a command. Refunds are full refunds. recon
+  totals are columns (not `totals jsonb`) and both sides are staged in `recon_records`; jobs are PG_VS_LEDGER,
+  TRANSFERS_VS_UPI and WALLET_INTEGRITY. Users raise disputes at `/api/v1/disputes` (admin-service). Audit queries read
+  admin-service's own `audit_log`.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?
