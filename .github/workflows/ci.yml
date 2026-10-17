@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, unit + integration tests, coverage gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # verify = unit tests (surefire) + Testcontainers ITs (failsafe) + JaCoCo check (>= 80% on service/entity/model)
+      - name: mvn verify
+        run: ./mvnw -B -ntp verify
+      - name: Coverage summary
+        if: always()
+        run: python3 .github/scripts/coverage_summary.py
+      - name: Test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+            **/target/site/jacoco/
+          retention-days: 14
+      - name: Service jars
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-jars
+          path: services/*/target/*.jar
+          retention-days: 3
+
+  generated-files:
+    name: Generated files are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grafana dashboards match their generator
+        run: |
+          python3 infra/grafana/build_dashboards.py
+          git diff --exit-code -- infra/grafana deploy/helm/payverse/files/dashboards
+      - name: Helm chart files match their sources
+        run: |
+          diff infra/postgres/init/01-create-databases.sh deploy/helm/payverse/files/01-create-databases.sh
+          diff infra/kafka/create-topics.sh deploy/helm/payverse/files/create-topics.sh
+      - name: Python scripts compile
+        run: python3 -m py_compile e2e/*.py load-tests/*.py infra/grafana/*.py .github/scripts/*.py
+
+  helm:
+    name: Helm lint + manifest validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Lint (dev and production values)
+        run: |
+          helm lint deploy/helm/payverse
+          helm lint deploy/helm/payverse --set infra.enabled=false --set secrets.existingSecret=payverse-secrets
+      - name: Validate against Kubernetes 1.31 schemas
+        run: |
+          helm template payverse deploy/helm/payverse > /tmp/dev.yaml
+          helm template payverse deploy/helm/payverse --set infra.enabled=false --set secrets.existingSecret=payverse-secrets \
+            --set services.wallet-service.autoscaling.enabled=true > /tmp/prod.yaml
+          for f in /tmp/dev.yaml /tmp/prod.yaml; do
+            docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.31.0 - < "$f"
+          done
+      - name: Rendered manifests are up to date
+        run: |
+          { echo "# Rendered from deploy/helm/payverse (make k8s-render). Dev profile: single-node infra included."
+            echo "# Create the Secret first: deploy/k8s/create-secret.sh, then: kubectl apply -n payverse -f deploy/k8s/payverse-dev.yaml"; echo
+            helm template payverse deploy/helm/payverse --namespace payverse --set secrets.existingSecret=payverse-secrets; } > deploy/k8s/payverse-dev.yaml
+          git diff --exit-code -- deploy/k8s
+
+  images:
+    name: Image ${{ matrix.service }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api-gateway, auth-service, user-service, wallet-service, transaction-service, payment-service, bill-payment-service,
+                  rewards-service, notification-service, fraud-risk-service, reconciliation-service, admin-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: service-jars
+          path: services
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      # PRs build amd64 only (fast) without pushing; main builds amd64 + arm64 and pushes to GHCR
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
