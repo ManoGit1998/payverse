@@ -198,6 +198,20 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   Tools run from Docker images (helm, kubeconform, actionlint) — none installed locally.
 - `make env` uses `sed -i.bak` (works with BSD and GNU sed; CI is Linux).
 
+## Web app (web/, added 2026-10-17)
+
+- React 19 + TypeScript 5.8 + Vite 6 + React Router 7 + TanStack Query 5 (pinned to well-known majors, not the newest
+  React Router 8 / Vite 8 / TS 7). Plain CSS tokens (light/dark), no UI library. Vitest 3 + Testing Library.
+- Talks to the gateway only (`/api/v1`); Vite proxies `/api` in dev (port 5173 — Grafana owns 3000).
+- `src/api/client.ts`: memory access token + localStorage refresh token, single-flight refresh, and a retry without refreshing
+  when another request already rotated the token (a `setTimeout`-cleared promise caused a stale-promise race — fixed).
+  `useIdempotencyKey`: one key per payload. Mutations never auto-retry. PIN asked per action via `usePin()`.
+- Types in `src/api/types.ts` mirror the Java DTO records; endpoints in `src/api/endpoints.ts` mirror `http/*.http`.
+  Note the two page shapes: `totalItems` (wallet/transaction/payment) vs `totalElements` (others).
+- Node ≥ 22 defines a global `localStorage` that shadows jsdom's: `src/test/setup.ts` installs an in-memory Storage.
+- npm 11 skips esbuild's postinstall; the platform binary comes from its optional dependency, builds work.
+- Not yet run against a live backend (services were intentionally kept down while building it).
+
 ## Conventions
 
 - **Package layout (layered, requested by the user on 2026-10-14 — replaces the hexagonal layout of the brief):**
@@ -268,6 +282,7 @@ make smoke                       # long live scenario, all phases (services from
 make e2e                         # whole stack in Docker + the brief's end-to-end scenario
 make load                        # k6 load test against a running stack
 make helm-lint                   # Helm chart lint + kubeconform (Docker)
+make web-install && make web-dev # React app on :5173 (proxies /api to the gateway)
 make env-upgrade                 # add settings introduced by later phases to an existing .env
 make build && docker compose --profile infra --profile core --profile payments --profile extras up -d   # services in Docker
 make ps                          # containers + memory

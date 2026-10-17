@@ -48,6 +48,24 @@ jobs:
           path: services/*/target/*.jar
           retention-days: 3
 
+  web:
+    name: Web app — typecheck, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+
   generated-files:
     name: Generated files are up to date
     runs-on: ubuntu-latest

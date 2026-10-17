@@ -159,6 +159,17 @@ k8s-render: ## Re-render deploy/k8s/payverse-dev.yaml from the Helm chart
 	   echo "# Create the Secret first: deploy/k8s/create-secret.sh, then: kubectl apply -n payverse -f deploy/k8s/payverse-dev.yaml"; echo; \
 	   $(HELM) template payverse payverse --namespace payverse --set secrets.existingSecret=payverse-secrets; } > deploy/k8s/payverse-dev.yaml
 
+# ------------------------------------------------------------------ web app (React)
+.PHONY: web-install web-dev web-test web-build
+web-install: ## Install the web app's dependencies (npm ci)
+	cd web && npm ci --no-audit --no-fund
+web-dev: ## Run the web app on :5173 (proxies /api to the gateway; GATEWAY_URL to override)
+	cd web && npm run dev
+web-test: ## Web app unit tests (Vitest, API mocked)
+	cd web && npm test
+web-build: ## Type-check and build the web app into web/dist
+	cd web && npm run build
+
 .PHONY: down
 down: ## Stop the service containers (infra keeps running)
 	$(COMPOSE) --profile core --profile payments --profile extras stop
