@@ -136,7 +136,7 @@ spring:
           - id: rewards
             uri: ${payverse.services.rewards}
             predicates:
-              - Path=/api/v1/rewards/**,/api/v1/admin/cashback-rules/**
+              - Path=/api/v1/rewards/**,/api/v1/admin/cashback-rules/**,/api/v1/admin/coupons/**
             filters:
               - name: RequestRateLimiter
                 args:
@@ -150,7 +150,7 @@ spring:
           - id: notification
             uri: ${payverse.services.notification}
             predicates:
-              - Path=/api/v1/notifications/**,/api/v1/admin/templates/**
+              - Path=/api/v1/notifications/**,/api/v1/admin/templates/**,/api/v1/admin/notifications/**,/api/v1/admin/dead-letters/**
             filters:
               - name: RequestRateLimiter
                 args:

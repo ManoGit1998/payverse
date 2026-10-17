@@ -32,6 +32,7 @@
         <module>services/wallet-service</module>
         <module>services/payment-service</module>
         <module>services/transaction-service</module>
+        <module>services/notification-service</module>
     </modules>
 
     <properties>

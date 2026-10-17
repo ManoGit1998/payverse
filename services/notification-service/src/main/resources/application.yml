@@ -1,0 +1,106 @@
+# notification-service — SMS, e-mail and push (MOCK providers), templates, retries, dead letters.
+server:
+  port: ${SERVER_PORT:8088}
+  shutdown: graceful
+
+spring:
+  application:
+    name: notification-service
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/notification_db
+    username: notification_svc
+    password: ${SERVICE_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration,classpath:db/common
+    # shared db/common migrations (idempotent) may be added after a service's own V1+
+    out-of-order: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      properties:
+        # the dead-letter listener subscribes by pattern; pick up new .dlt topics within 30s
+        metadata.max.age.ms: 30000
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+payverse:
+  notification:
+    max-attempts: ${NOTIFICATION_MAX_ATTEMPTS:5}
+    dispatch-batch: 50
+    dispatch-interval-ms: 1000
+    # MOCK providers for these channels always fail (SMS, EMAIL, PUSH), to try retries and DEAD
+    mock-failing-channels: ${NOTIFICATION_MOCK_FAILING_CHANNELS:}
+  security:
+    jwk-set-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+    issuer: ${JWT_ISSUER:http://localhost:8081}
+    audience: payverse
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        step: 30s
+
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:logstash}
+    json:
+      customizer: com.payverse.common.web.masking.PiiMaskingLogCustomizer
+  level:
+    root: INFO
+    com.payverse: INFO

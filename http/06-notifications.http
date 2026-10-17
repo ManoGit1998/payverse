@@ -1,0 +1,38 @@
+### PayVerse — notification-service through the gateway. Messages are MOCK: read them in the
+### notification-service log ("[MOCK PUSH] ..."). Admin calls need a token for a mobile in ADMIN_MOBILES
+### (log in with it in 01-auth.http and store it as adminToken).
+
+### My inbox (newest first, with the unread count)
+GET {{gateway}}/api/v1/notifications/me?page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+> {% if (response.body.items.length > 0) client.global.set("notificationId", response.body.items[0].id); %}
+
+### Mark one as read
+POST {{gateway}}/api/v1/notifications/me/{{notificationId}}/read
+Authorization: Bearer {{accessToken}}
+
+### Admin: list templates (ADMIN or SUPPORT)
+GET {{gateway}}/api/v1/admin/templates
+Authorization: Bearer {{adminToken}}
+
+### Admin: edit a template (ADMIN). Placeholders look like {{amount}}; unknown ones render empty.
+PUT {{gateway}}/api/v1/admin/templates/PAYMENT_RECEIVED/PUSH
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "subject": "Money received", "body": "INR {{amount}} just landed in your wallet.", "active": true }
+
+### Admin: requeue a DEAD notification (ADMIN)
+POST {{gateway}}/api/v1/admin/notifications/{{notificationId}}/retry
+Authorization: Bearer {{adminToken}}
+
+### Admin: dead-lettered Kafka messages from every service (onlyOpen=false includes replayed ones)
+GET {{gateway}}/api/v1/admin/dead-letters?onlyOpen=true
+Authorization: Bearer {{adminToken}}
+
+> {% if (response.body.items.length > 0) client.global.set("deadLetterId", response.body.items[0].id); %}
+
+### Admin: replay a dead letter to its original topic (ADMIN; consumers de-duplicate on eventId)
+POST {{gateway}}/api/v1/admin/dead-letters/{{deadLetterId}}/replay
+Authorization: Bearer {{adminToken}}

@@ -1,0 +1,22 @@
+# Shared settings for Testcontainers integration tests.
+spring:
+  kafka:
+    consumer:
+      auto-offset-reset: earliest
+      properties:
+        metadata.max.age.ms: 1000
+payverse:
+  outbox:
+    poll-interval: 100ms
+management:
+  tracing:
+    export:
+      enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
