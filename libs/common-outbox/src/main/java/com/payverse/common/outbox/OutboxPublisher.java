@@ -4,6 +4,7 @@ import com.payverse.common.events.EventEnvelope;
 import com.payverse.common.events.EventType;
 import org.slf4j.MDC;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
@@ -15,11 +16,18 @@ public class OutboxPublisher {
     private final JdbcTemplate jdbc;
     private final EventEnvelopeCodec codec;
     private final String producer;
+    private final OutboxMetrics metrics;
 
     public OutboxPublisher(JdbcTemplate jdbc, EventEnvelopeCodec codec, String producer) {
+        this(jdbc, codec, producer, null);
+    }
+
+    /** @param metrics optional; counts each event once its transaction commits */
+    public OutboxPublisher(JdbcTemplate jdbc, EventEnvelopeCodec codec, String producer, OutboxMetrics metrics) {
         this.jdbc = jdbc;
         this.codec = codec;
         this.producer = producer;
+        this.metrics = metrics;
     }
 
     /** Builds an envelope (producer + current correlation id) and stores it. */
@@ -39,5 +47,13 @@ public class OutboxPublisher {
                         """,
                 envelope.eventId(), envelope.topic(), envelope.eventType(), envelope.aggregateType(),
                 envelope.aggregateId(), codec.encode(envelope), envelope.correlationId());
+        if (metrics != null) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    metrics.committed(envelope);
+                }
+            });
+        }
     }
 }

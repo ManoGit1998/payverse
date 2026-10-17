@@ -9,6 +9,7 @@ import com.payverse.notification.entity.NotificationStatus;
 import com.payverse.notification.entity.Template;
 import com.payverse.notification.repository.NotificationRepository;
 import com.payverse.notification.repository.TemplateRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -87,7 +88,7 @@ class NotificationServicesTest {
         PlatformTransactionManager tm = mock(PlatformTransactionManager.class);
         when(tm.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
-        NotificationDispatcher dispatcher = new NotificationDispatcher(notifications, providers, props, tm, clock);
+        NotificationDispatcher dispatcher = new NotificationDispatcher(notifications, providers, props, tm, new SimpleMeterRegistry(), clock);
         assertThat(dispatcher.dispatchDue()).isEqualTo(1);
         assertThat(ok.getStatus()).isEqualTo(NotificationStatus.SENT);
         assertThat(ok.getProviderRef()).startsWith("push-");
@@ -95,7 +96,7 @@ class NotificationServicesTest {
         assertThat(failing.getLastError()).contains("MockSmsProvider");
 
         when(notifications.findDue(any(), any(Pageable.class))).thenReturn(List.of(failing.getId()));
-        NotificationDispatcher later = new NotificationDispatcher(notifications, providers, props, tm,
+        NotificationDispatcher later = new NotificationDispatcher(notifications, providers, props, tm, new SimpleMeterRegistry(),
                 Clock.fixed(NOW.plusSeconds(60), ZoneOffset.UTC));
         assertThat(later.dispatchDue()).isZero();
         assertThat(failing.getStatus()).isEqualTo(NotificationStatus.DEAD);

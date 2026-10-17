@@ -16,6 +16,7 @@ import com.payverse.fraud.repository.RiskAssessmentRepository;
 import com.payverse.fraud.repository.RiskRuleConfigRepository;
 import com.payverse.fraud.repository.UserRiskProfileRepository;
 import com.payverse.fraud.repository.VelocityStore;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -61,11 +62,13 @@ public class RiskEngine {
     private final OutboxPublisher outbox;
     private final FraudProperties properties;
     private final TransactionTemplate tx;
+    private final MeterRegistry meters;
     private final Clock clock;
 
     public RiskEngine(List<RiskRule> ruleList, RiskModel model, RiskRuleConfigRepository configs, RiskAssessmentRepository assessments,
                       FlagRepository flags, UserRiskProfileRepository profiles, KnownDeviceRepository devices, VelocityStore velocity,
-                      OutboxPublisher outbox, FraudProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
+                      OutboxPublisher outbox, FraudProperties properties, PlatformTransactionManager transactionManager, MeterRegistry meters,
+                      Clock clock) {
         this.rules = ruleList.stream().collect(Collectors.toMap(RiskRule::code, Function.identity()));
         this.model = model;
         this.configs = configs;
@@ -77,7 +80,13 @@ public class RiskEngine {
         this.outbox = outbox;
         this.properties = properties;
         this.tx = new TransactionTemplate(transactionManager);
+        this.meters = meters;
         this.clock = clock;
+        // series start at 0 so increase()/rate() count the first decisions too (OTLP push)
+        for (Decision d : Decision.values()) {
+            meters.counter("payverse.risk.decisions", "decision", d.name());
+        }
+        rules.keySet().forEach(code -> meters.counter("payverse.risk.rule.hits", "rule", code));
     }
 
     public RiskAssessment assess(AssessCommand command) {
@@ -111,7 +120,10 @@ public class RiskEngine {
         RiskAssessment assessment = RiskAssessment.record(command.transactionId(), command.userId(), command.payeeUserId(), command.type(),
                 command.amount(), command.currency(), command.deviceId(), score, decision, reasons, model.version(), now);
         try {
-            return tx.execute(status -> save(assessment, now));
+            RiskAssessment saved = tx.execute(status -> save(assessment, now));
+            meters.counter("payverse.risk.decisions", "decision", saved.getDecision().name()).increment();
+            reasons.forEach(r -> meters.counter("payverse.risk.rule.hits", "rule", r).increment());
+            return saved;
         } catch (DataIntegrityViolationException raced) {
             return assessments.findByTransactionId(command.transactionId()).orElseThrow(() -> raced);
         }

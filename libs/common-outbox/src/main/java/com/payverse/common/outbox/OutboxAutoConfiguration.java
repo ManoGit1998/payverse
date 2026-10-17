@@ -1,6 +1,8 @@
 package com.payverse.common.outbox;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -41,10 +43,11 @@ public class OutboxAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnBean({JdbcTemplate.class, EventEnvelopeCodec.class})
     OutboxPublisher outboxPublisher(JdbcTemplate jdbc, EventEnvelopeCodec codec, OutboxProperties properties,
-                                    Environment environment) {
+                                    Environment environment, ObjectProvider<MeterRegistry> meterRegistry) {
         String producer = properties.producer() != null ? properties.producer()
                 : environment.getProperty("spring.application.name", "unknown-service");
-        return new OutboxPublisher(jdbc, codec, producer);
+        MeterRegistry registry = meterRegistry.getIfAvailable();
+        return new OutboxPublisher(jdbc, codec, producer, registry == null ? null : new OutboxMetrics(registry, jdbc));
     }
 
     @Bean
