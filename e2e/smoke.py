@@ -18,6 +18,15 @@ WALLET = os.environ.get("WALLET_SERVICE_URL", "http://localhost:8083")
 REWARDS = os.environ.get("REWARDS_SERVICE_URL", "http://localhost:8087")
 
 def call(method, path, token=None, body=None, headers=None, base=G, raw=False):
+    """429 (5 OTP/PIN calls per minute per IP at the gateway) waits and retries instead of silently failing."""
+    for _ in range(8):
+        status, result = _call(method, path, token, body, headers, base, raw)
+        if status != 429:
+            return status, result
+        time.sleep(15)
+    return status, result
+
+def _call(method, path, token=None, body=None, headers=None, base=G, raw=False):
     h = {"Content-Type": "application/json"}
     if token: h["Authorization"] = "Bearer " + token
     h.update(headers or {})
@@ -43,7 +52,8 @@ def signup(label, referral_code=None, auth_base=G):
     s, r = call("POST", "/api/v1/auth/otp/verify", body={"mobile": mobile, "otp": otp_for("******" + mobile[6:]), "deviceId": "e2e-" + label + "-device",
                                                           "referralCode": referral_code}, base=auth_base)
     tok = r["accessToken"]
-    call("POST", "/api/v1/auth/pin", tok, {"pin": "4826"}, base=auth_base)
+    s_pin, _ = call("POST", "/api/v1/auth/pin", tok, {"pin": "4826"}, base=auth_base)
+    assert s_pin in (200, 201, 204), f"set PIN: {s_pin}"
     pan = "ABCDE" + str(random.randint(1000, 8999)) + random.choice("FGHJK")
     s, _ = call("POST", "/api/v1/users/me/kyc/min", tok, {"documentType": "PAN", "documentNumber": pan, "fullName": label + " Kumar", "dateOfBirth": "1994-02-11"})
     assert s == 200, s

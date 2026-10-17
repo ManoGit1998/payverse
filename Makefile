@@ -124,9 +124,21 @@ docker-prune: ## Remove dangling images, stopped containers and build cache
 	docker builder prune -f
 
 .PHONY: smoke
-smoke: ## Live smoke test of auth/user/wallet/payment/transaction through the gateway (services must be running)
+smoke: ## Long live scenario across all services from source (make run-*): every phase's features + exact balances
 	python3 e2e/smoke.py
 
 .PHONY: e2e
-e2e: ## End-to-end scenario (implemented in Phase 8)
-	@echo "make e2e is implemented in Phase 8 (signs up two users, adds money, transfers, pays a bill, checks ledgers)."; exit 1
+e2e: ## Whole stack in Docker (12 services) + end-to-end scenario: sign up, add money, transfer, pay a bill, check ledgers
+	@if lsof -a -nP -iTCP:8080-8091 -sTCP:LISTEN -c java >/dev/null 2>&1; then \
+		echo "Services started with 'make run-*' hold ports 8080-8091: stop them first (or use 'make e2e-local')."; exit 1; fi
+	$(MVN) -q -DskipTests package
+	$(COMPOSE) --profile infra --profile core --profile payments --profile extras up -d --build --wait --wait-timeout 420
+	OTP_SOURCE=docker python3 e2e/e2e.py
+
+.PHONY: e2e-local
+e2e-local: ## End-to-end scenario against services already running from source (make run-*)
+	OTP_SOURCE=file python3 e2e/e2e.py
+
+.PHONY: down
+down: ## Stop the service containers (infra keeps running)
+	$(COMPOSE) --profile core --profile payments --profile extras stop
