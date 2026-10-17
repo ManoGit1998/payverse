@@ -128,6 +128,28 @@ public class Transaction {
     @Column(name = "risk_decision")
     private String riskDecision;
 
+    @Column(name = "refund_id")
+    private UUID refundId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "refund_status")
+    private RefundStatus refundStatus;
+
+    @Column(name = "refund_reason")
+    private String refundReason;
+
+    @Column(name = "refund_failure_code")
+    private String refundFailureCode;
+
+    @Column(name = "refund_payee_journal_id")
+    private UUID refundPayeeJournalId;
+
+    @Column(name = "refund_payer_journal_id")
+    private UUID refundPayerJournalId;
+
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
     @Column(name = "completed_at")
     private Instant completedAt;
 
@@ -253,6 +275,68 @@ public class Transaction {
         nextAttemptAt = now.plus(Duration.ofSeconds(delay));
         failureReason = truncate(reason);
         updatedAt = now;
+    }
+
+    /**
+     * Starts (or resumes) a refund. Only a SUCCESS transfer can be refunded; a refund that FAILED
+     * (e.g. the payee had already spent the money) may be retried with a new refund id.
+     * @return false if this refund id is already COMPLETED (nothing to do)
+     */
+    public boolean startRefund(UUID id, String reason, Instant now) {
+        if (id.equals(refundId)) {
+            if (refundStatus == RefundStatus.COMPLETED) {
+                return false;
+            }
+            if (refundStatus == RefundStatus.PENDING) {
+                return true;
+            }
+        }
+        if (status != TransactionStatus.SUCCESS) {
+            throw new PayverseException(TransactionErrorCode.TXN_NOT_REFUNDABLE, "Only SUCCESS transfers can be refunded (this one is " + status + ")");
+        }
+        if (refundStatus == RefundStatus.PENDING) {
+            throw new PayverseException(TransactionErrorCode.TXN_NOT_REFUNDABLE, "Another refund is in progress");
+        }
+        refundId = id;
+        refundStatus = RefundStatus.PENDING;
+        refundReason = truncate(reason);
+        refundFailureCode = null;
+        updatedAt = now;
+        return true;
+    }
+
+    public void recordPayeeReversal(UUID journalId, Instant now) {
+        requireRefund();
+        refundPayeeJournalId = journalId;
+        updatedAt = now;
+    }
+
+    public StatusChange completeRefund(UUID journalId, Instant now) {
+        requireRefund();
+        if (refundPayeeJournalId == null) {
+            throw new PayverseException(TransactionErrorCode.TXN_ILLEGAL_STATE, "The payee must be reversed first");
+        }
+        refundPayerJournalId = journalId;
+        refundStatus = RefundStatus.COMPLETED;
+        refundedAt = now;
+        return transitionTo(TransactionStatus.REVERSED, "refunded: " + (refundReason == null ? "approved refund" : refundReason), now);
+    }
+
+    /** The payee's wallet refused the reversal (no money, or already reversed): nothing moved. */
+    public void failRefund(String code, Instant now) {
+        requireRefund();
+        if (refundPayeeJournalId != null) {
+            throw new PayverseException(TransactionErrorCode.TXN_ILLEGAL_STATE, "Payee already reversed: the refund must complete");
+        }
+        refundStatus = RefundStatus.FAILED;
+        refundFailureCode = code;
+        updatedAt = now;
+    }
+
+    private void requireRefund() {
+        if (refundStatus != RefundStatus.PENDING) {
+            throw new PayverseException(TransactionErrorCode.TXN_ILLEGAL_STATE, "No refund in progress");
+        }
     }
 
     public boolean involves(UUID userId) {

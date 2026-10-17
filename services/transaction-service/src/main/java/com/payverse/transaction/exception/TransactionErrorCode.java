@@ -10,6 +10,7 @@ public enum TransactionErrorCode implements ErrorCode {
     TXN_PIN_REQUIRED(400, "X-Txn-Pin header is required"),
     TXN_INVALID_SPLIT(400, "Invalid split"),
     TXN_RISK_BLOCKED(403, "Transfer blocked by risk checks"),
+    TXN_NOT_REFUNDABLE(409, "Transaction cannot be refunded"),
     TXN_NOT_FOUND(404, "Transaction not found"),
     TXN_MONEY_REQUEST_NOT_FOUND(404, "Money request not found"),
     TXN_SPLIT_NOT_FOUND(404, "Split bill not found"),

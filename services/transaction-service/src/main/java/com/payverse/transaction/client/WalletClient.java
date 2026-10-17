@@ -41,6 +41,11 @@ public class WalletClient {
                 Map.of("journalId", journalId, "reason", reason == null ? "transfer failed" : reason));
     }
 
+    /** Reverses a journal with a caller-chosen idempotency key (refunds). */
+    public Posting reverseJournal(UUID userId, UUID journalId, String idempotencyKey, String reason) {
+        return post("/internal/wallets/{userId}/reverse", userId, idempotencyKey, Map.of("journalId", journalId, "reason", reason));
+    }
+
     private static Map<String, Object> transferBody(Money amount, UUID transactionId, String description) {
         return Map.of("amount", amount.amount(), "purpose", "TRANSFER", "referenceType", "Transaction",
                 "referenceId", transactionId.toString(), "description", description == null ? "P2P transfer" : description);

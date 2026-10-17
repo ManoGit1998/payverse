@@ -1,6 +1,8 @@
 package com.payverse.transaction.repository;
 
 import com.payverse.transaction.entity.Transaction;
+import com.payverse.transaction.entity.TransactionStatus;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -8,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,6 +18,9 @@ import java.util.UUID;
 public interface TransactionRepository extends JpaRepository<Transaction, UUID>, JpaSpecificationExecutor<Transaction> {
 
     Optional<Transaction> findByPayerUserIdAndIdempotencyKey(UUID payerUserId, String idempotencyKey);
+
+    Page<Transaction> findByStatusInAndCompletedAtGreaterThanEqualAndCompletedAtLessThanOrderByCompletedAtAscIdAsc(
+            Collection<TransactionStatus> statuses, Instant from, Instant to, Pageable pageable);
 
     /** Unfinished sagas due for another attempt, or silent for too long (e.g. the instance crashed mid-saga). */
     @Query("""

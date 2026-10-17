@@ -130,4 +130,43 @@ class TransactionEntityTest {
                 .isInstanceOf(PayverseException.class);
         assertThat(SplitBill.create(requester, Money.inr("90"), Money.inr("30"), null, NOW).getCreatorShareMoney()).isEqualTo(Money.inr("30"));
     }
+
+    static Transaction succeeded() {
+        Transaction t = txn();
+        t.markPending(NOW);
+        t.recordDebit(UUID.randomUUID(), NOW);
+        t.recordCredit(UUID.randomUUID(), NOW);
+        return t;
+    }
+
+    @Test
+    void refundLifecycle() {
+        Transaction t = succeeded();
+        UUID refund = UUID.randomUUID();
+        assertThat(t.startRefund(refund, "duplicate", NOW)).isTrue();
+        assertThat(t.startRefund(refund, "duplicate", NOW)).isTrue(); // resume
+        assertThatThrownBy(() -> t.startRefund(UUID.randomUUID(), "x", NOW)).isInstanceOf(PayverseException.class);
+        assertThatThrownBy(() -> t.completeRefund(UUID.randomUUID(), NOW)).isInstanceOf(PayverseException.class); // payee first
+        t.recordPayeeReversal(UUID.randomUUID(), NOW);
+        assertThatThrownBy(() -> t.failRefund("X", NOW)).isInstanceOf(PayverseException.class);
+        Transaction.StatusChange change = t.completeRefund(UUID.randomUUID(), NOW);
+        assertThat(change.to()).isEqualTo(TransactionStatus.REVERSED);
+        assertThat(t.getRefundStatus()).isEqualTo(RefundStatus.COMPLETED);
+        assertThat(t.startRefund(refund, "again", NOW)).isFalse();
+        assertThatThrownBy(() -> t.startRefund(UUID.randomUUID(), "x", NOW)).isInstanceOf(PayverseException.class);
+    }
+
+    @Test
+    void failedRefundCanBeRetriedWithANewId() {
+        Transaction t = succeeded();
+        t.startRefund(UUID.randomUUID(), "r", NOW);
+        t.failRefund("WALLET_INSUFFICIENT_BALANCE", NOW);
+        assertThat(t.getRefundStatus()).isEqualTo(RefundStatus.FAILED);
+        assertThat(t.getStatus()).isEqualTo(TransactionStatus.SUCCESS);
+        assertThatThrownBy(() -> t.failRefund("X", NOW)).isInstanceOf(PayverseException.class);
+        assertThat(t.startRefund(UUID.randomUUID(), "retry", NOW)).isTrue();
+        assertThat(t.getRefundFailureCode()).isNull();
+        assertThatThrownBy(() -> txn().startRefund(UUID.randomUUID(), "x", NOW)).isInstanceOf(PayverseException.class);
+        assertThat(txn().fromDevice("d").getDeviceId()).isEqualTo("d");
+    }
 }

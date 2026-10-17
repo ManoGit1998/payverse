@@ -20,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -45,6 +47,18 @@ public class TransactionQueryService {
     public Transaction get(UUID viewer, UUID transactionId) {
         return transactions.findById(transactionId).filter(t -> t.involves(viewer))
                 .orElseThrow(() -> new PayverseException(TransactionErrorCode.TXN_NOT_FOUND, null));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Transaction> find(UUID transactionId) {
+        return transactions.findById(transactionId);
+    }
+
+    /** For reconciliation: settled transactions by completion time in [from, to). */
+    @Transactional(readOnly = true)
+    public Page<Transaction> completedBetween(Collection<TransactionStatus> statuses, Instant from, Instant to, int page, int size) {
+        return transactions.findByStatusInAndCompletedAtGreaterThanEqualAndCompletedAtLessThanOrderByCompletedAtAscIdAsc(statuses, from, to,
+                PageRequest.of(page, size));
     }
 
     @Transactional(readOnly = true)

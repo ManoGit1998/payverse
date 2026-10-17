@@ -218,6 +218,58 @@ class TransactionServiceIT {
                 .andExpect(jsonPath("$.failureCode").value("TXN_RISK_BLOCKED"));
     }
 
+    static final String RECON = "Bearer " + TestJwts.INSTANCE.token("admin-service", List.of("SERVICE"));
+
+    ResultActions refund(UUID txn, UUID refundId) throws Exception {
+        return mvc.perform(post("/internal/transactions/{id}/refund", txn).header(HttpHeaders.AUTHORIZATION, RECON)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"refundId\":\"" + refundId + "\",\"reason\":\"dispute upheld\"}"));
+    }
+
+    @Test
+    void approvedRefundReversesBothSidesOnce() throws Exception {
+        String body = send(payer, UUID.randomUUID().toString(), "4826", toVpa("120")).andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andReturn().getResponse().getContentAsString();
+        UUID txn = UUID.fromString(JsonPath.read(body, "$.transactionId"));
+        UUID refundId = UUID.randomUUID();
+
+        refund(txn, refundId).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REVERSED"))
+                .andExpect(jsonPath("$.refundStatus").value("COMPLETED"));
+        refund(txn, refundId).andExpect(status().isOk()).andExpect(jsonPath("$.refundStatus").value("COMPLETED"));
+        DOWNSTREAM.verify(1, postRequestedFor(urlEqualTo("/internal/wallets/" + payee + "/reverse"))
+                .withHeader("Idempotency-Key", equalTo("refund:" + refundId + ":payee")));
+        DOWNSTREAM.verify(1, postRequestedFor(urlEqualTo("/internal/wallets/" + payer + "/reverse"))
+                .withHeader("Idempotency-Key", equalTo("refund:" + refundId + ":payer")));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'transaction.reversed' AND aggregate_id = ?",
+                Long.class, txn.toString())).isEqualTo(1);
+        refund(txn, UUID.randomUUID()).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("TXN_NOT_REFUNDABLE"));
+
+        mvc.perform(get("/internal/transactions/{id}", txn).header(HttpHeaders.AUTHORIZATION, RECON))
+                .andExpect(jsonPath("$.status").value("REVERSED")).andExpect(jsonPath("$.payeeUserId").value(payee.toString()));
+        String window = "from=" + java.time.Instant.now().minusSeconds(600) + "&to=" + java.time.Instant.now().plusSeconds(60);
+        String list = mvc.perform(get("/internal/transactions?size=1000&" + window).header(HttpHeaders.AUTHORIZATION, RECON))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(list, "$.items[*].id")).contains(txn.toString());
+        mvc.perform(get("/internal/transactions/{id}", UUID.randomUUID()).header(HttpHeaders.AUTHORIZATION, RECON)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void refundFailsWhenThePayeeSpentTheMoneyAndCanBeRetried() throws Exception {
+        String body = send(payer, UUID.randomUUID().toString(), "4826", toVpa("80")).andReturn().getResponse().getContentAsString();
+        UUID txn = UUID.fromString(JsonPath.read(body, "$.transactionId"));
+        DOWNSTREAM.stubFor(WireMock.post("/internal/wallets/" + payee + "/reverse").atPriority(1)
+                .willReturn(problem(422, "WALLET_INSUFFICIENT_BALANCE", null)));
+        refund(txn, UUID.randomUUID()).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.refundStatus").value("FAILED")).andExpect(jsonPath("$.refundFailureCode").value("WALLET_INSUFFICIENT_BALANCE"));
+        DOWNSTREAM.verify(0, postRequestedFor(urlEqualTo("/internal/wallets/" + payer + "/reverse")));
+
+        DOWNSTREAM.stubFor(WireMock.post("/internal/wallets/" + payee + "/reverse").atPriority(1).willReturn(aResponse().withStatus(503)));
+        UUID retry = UUID.randomUUID();
+        refund(txn, retry).andExpect(status().isAccepted()).andExpect(jsonPath("$.refundStatus").value("PENDING"));
+        DOWNSTREAM.resetAll();
+        stubs(); // healthy wallet again (fresh stubs)
+        refund(txn, retry).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REVERSED"));
+    }
+
     @Test
     void pinAndValidationFailuresCreateNothing() throws Exception {
         send(payer, UUID.randomUUID().toString(), null, toVpa("10")).andExpect(status().isBadRequest())

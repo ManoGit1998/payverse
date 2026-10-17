@@ -33,6 +33,12 @@ public class TransactionEventPublisher {
                 t.getId(), t.getType().name(), t.getPayerUserId(), Amount.of(t.getAmountMoney()), t.getFailureCode()));
     }
 
+    /** {@code transactionId} of the event is the refund id; the original transfer is {@code originalTransactionId}. */
+    public void reversed(Transaction t) {
+        outbox.publish(EventType.TRANSACTION_REVERSED, t.getId().toString(), new TransactionEvents.TransactionReversed(
+                t.getRefundId(), t.getId(), t.getPayerUserId(), t.getPayeeUserId(), Amount.of(t.getAmountMoney()), t.getRefundReason()));
+    }
+
     public void moneyRequested(MoneyRequest r) {
         outbox.publish(EventType.MONEY_REQUESTED, r.getId().toString(), new TransactionEvents.MoneyRequested(
                 r.getId(), r.getRequesterUserId(), r.getPayerUserId(), Amount.of(r.getAmountMoney()), r.getNote(), r.getExpiresAt()));
