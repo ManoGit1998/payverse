@@ -12,7 +12,7 @@ public sealed interface PaymentEvents {
                             Instant expiresAt) implements PaymentEvents {
     }
 
-    record PgChargeSettled(UUID orderId, UUID walletId, Amount amount, String provider, String providerReference,
+    record PgChargeSettled(UUID orderId, UUID userId, Amount amount, String provider, String providerReference,
                            String status) implements PaymentEvents {
     }
 }
