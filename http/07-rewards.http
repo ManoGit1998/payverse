@@ -1,0 +1,57 @@
+### PayVerse — rewards-service through the gateway. A P2P payment of INR 100+ (04-transactions.http)
+### earns a scratch card; the first add-money of INR 500+ (03-wallet.http) earns INR 25.
+
+### My totals and recent rewards
+GET {{gateway}}/api/v1/rewards/me
+Authorization: Bearer {{accessToken}}
+
+### My scratch cards (amount hidden until scratched)
+GET {{gateway}}/api/v1/rewards/scratch-cards
+Authorization: Bearer {{accessToken}}
+
+> {% if (response.body.items.length > 0) client.global.set("cardId", response.body.items[0].id); %}
+
+### Scratch it: the cashback reaches the wallet within a second or two
+POST {{gateway}}/api/v1/rewards/scratch-cards/{{cardId}}/scratch
+Authorization: Bearer {{accessToken}}
+
+### Coupons I can redeem
+GET {{gateway}}/api/v1/rewards/coupons
+Authorization: Bearer {{accessToken}}
+
+### Redeem the seeded coupon (once per user)
+POST {{gateway}}/api/v1/rewards/coupons/PAYVERSE10/redeem
+Authorization: Bearer {{accessToken}}
+
+### My referral code (share it: a friend enters it as referralCode in the OTP verify call of 01-auth.http)
+GET {{gateway}}/api/v1/rewards/referral
+Authorization: Bearer {{accessToken}}
+
+### Admin: cashback rules with budget usage (ADMIN or SUPPORT)
+GET {{gateway}}/api/v1/admin/cashback-rules
+Authorization: Bearer {{adminToken}}
+
+### Admin: create a rule (ADMIN)
+POST {{gateway}}/api/v1/admin/cashback-rules
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "code": "WEEKEND_P2P_2PCT", "name": "2% on P2P payments of INR 500+ (max INR 20)",
+  "trigger": "P2P_TRANSFER", "rewardType": "PERCENT", "percent": 2, "maxReward": 20,
+  "minTxnAmount": 500, "dailyCapPerUser": 1, "budget": 5000, "priority": 50, "active": true
+}
+
+### Admin: create a coupon (ADMIN)
+POST {{gateway}}/api/v1/admin/coupons
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "code": "DIWALI25", "description": "INR 25 Diwali cashback", "cashback": 25.00, "validUntil": "2026-11-30T18:29:59Z", "usageLimit": 1000 }
+
+### Admin: deactivate a coupon
+PUT {{gateway}}/api/v1/admin/coupons/DIWALI25/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "active": false }

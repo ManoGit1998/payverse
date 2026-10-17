@@ -1,0 +1,109 @@
+# rewards-service — cashback rules engine, scratch cards, coupons, referral bonuses.
+server:
+  port: ${SERVER_PORT:8087}
+  shutdown: graceful
+
+spring:
+  application:
+    name: rewards-service
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/rewards_db
+    username: rewards_svc
+    password: ${SERVICE_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration,classpath:db/common
+    # shared db/common migrations (idempotent) may be added after a service's own V1+
+    out-of-order: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: rewards-service
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+payverse:
+  rewards:
+    wallet-service-url: ${WALLET_SERVICE_URL:http://localhost:8083}
+    scratch-card-validity: 30d
+    referrer-bonus: 100.00
+    referee-bonus: 50.00
+    max-credit-attempts: 8
+    credit-interval-ms: 1000         # RewardCreditJob: credits pending rewards to wallets
+    expiry-interval-ms: 60000        # expires unscratched cards
+  service-client:
+    client-id: rewards-service
+    client-secret: ${SERVICE_CLIENT_SECRET:}
+    token-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/api/v1/auth/oauth/token
+  security:
+    jwk-set-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
+    issuer: ${JWT_ISSUER:http://localhost:8081}
+    audience: payverse
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        step: 30s
+
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:logstash}
+    json:
+      customizer: com.payverse.common.web.masking.PiiMaskingLogCustomizer
+  level:
+    root: INFO
+    com.payverse: INFO
