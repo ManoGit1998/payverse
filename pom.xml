@@ -36,6 +36,7 @@
         <module>services/rewards-service</module>
         <module>services/fraud-risk-service</module>
         <module>services/bill-payment-service</module>
+        <module>services/reconciliation-service</module>
     </modules>
 
     <properties>
