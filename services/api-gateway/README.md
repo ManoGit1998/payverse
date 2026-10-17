@@ -30,8 +30,8 @@ service exposed to clients. Port **8080**.
 | `/api/v1/transfers/**`, `/transactions/**`, `/money-requests/**`, `/split-bills/**` | transaction-service |
 | `/api/v1/vpa/**`, `/collect-requests/**`, `/qr/**`, `/pg/**` | payment-service |
 | `/api/v1/billers/**`, `/bills/**`, `/mandates/**` | bill-payment-service |
-| `/api/v1/rewards/**`, `/api/v1/admin/cashback-rules/**` | rewards-service |
-| `/api/v1/notifications/**`, `/api/v1/admin/templates/**` | notification-service |
+| `/api/v1/rewards/**`, `/api/v1/admin/cashback-rules/**`, `/api/v1/admin/coupons/**` | rewards-service |
+| `/api/v1/notifications/**`, `/api/v1/admin/templates/**`, `/admin/notifications/**`, `/admin/dead-letters/**` | notification-service |
 | `/api/v1/admin/risk/**` | fraud-risk-service |
 | `/api/v1/admin/recon/**` | reconciliation-service |
 | `/api/v1/admin/**` | admin-service |

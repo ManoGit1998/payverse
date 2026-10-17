@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 PayVerse smoke test against locally running services (make run-<service> for auth, user, wallet,
-payment, transaction and api-gateway; infra via make infra-up). Python 3 standard library only.
+payment, transaction and api-gateway, plus rewards and notification for the Phase 5 part; infra via
+make infra-up). Python 3 standard library only.
 
 Two users sign up (OTP read from .run/auth-service.log — the MOCK SMS sender), set a PIN and pass
 min KYC; then: add money, pay by UPI ID / mobile / dynamic QR, a money request, a UPI collect,
@@ -14,6 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 G = os.environ.get("GATEWAY_URL", "http://localhost:8080")
 AUTH = os.environ.get("AUTH_SERVICE_URL", "http://localhost:8081")
 WALLET = os.environ.get("WALLET_SERVICE_URL", "http://localhost:8083")
+REWARDS = os.environ.get("REWARDS_SERVICE_URL", "http://localhost:8087")
 
 def call(method, path, token=None, body=None, headers=None, base=G, raw=False):
     h = {"Content-Type": "application/json"}
@@ -34,12 +36,14 @@ def otp_for(masked):
         time.sleep(0.5)
     raise SystemExit("no otp")
 
-def signup(label):
+def signup(label, referral_code=None, auth_base=G):
+    """auth_base=AUTH skips the gateway's OTP/PIN rate limit (5/min per IP) for a third sign-up."""
     mobile = "9" + "".join(random.choice("0123456789") for _ in range(9))
-    call("POST", "/api/v1/auth/otp/request", body={"mobile": mobile})
-    s, r = call("POST", "/api/v1/auth/otp/verify", body={"mobile": mobile, "otp": otp_for("******" + mobile[6:]), "deviceId": "e2e-" + label + "-device"})
+    call("POST", "/api/v1/auth/otp/request", body={"mobile": mobile}, base=auth_base)
+    s, r = call("POST", "/api/v1/auth/otp/verify", body={"mobile": mobile, "otp": otp_for("******" + mobile[6:]), "deviceId": "e2e-" + label + "-device",
+                                                          "referralCode": referral_code}, base=auth_base)
     tok = r["accessToken"]
-    call("POST", "/api/v1/auth/pin", tok, {"pin": "4826"})
+    call("POST", "/api/v1/auth/pin", tok, {"pin": "4826"}, base=auth_base)
     pan = "ABCDE" + str(random.randint(1000, 8999)) + random.choice("FGHJK")
     s, _ = call("POST", "/api/v1/users/me/kyc/min", tok, {"documentType": "PAN", "documentNumber": pan, "fullName": label + " Kumar", "dateOfBirth": "1994-02-11"})
     assert s == 200, s
@@ -103,9 +107,52 @@ print("9. pay external UPI ID:", s, r["code"])
 s, r = call("POST", "/api/v1/transfers", a["token"], {"payee": {"type": "VPA", "value": b["vpa"]}, "amount": 10}, {"Idempotency-Key": str(uuid.uuid4()), "X-Txn-Pin": "1111"})
 print("10. wrong PIN:", s, r["code"], "remaining", r.get("remainingAttempts"))
 
+def wait_for(check, what, tries=60):
+    for _ in range(tries):
+        value = check()
+        if value: return value
+        time.sleep(0.5)
+    raise SystemExit("timed out waiting for " + what)
+
+def credited(u):
+    return float(call("GET", "/api/v1/rewards/me", u["token"])[1]["totalCredited"]["amount"])
+
+cashback_a = cashback_b = 0.0
+try:
+    rewards_up = call("GET", "/actuator/health", base=REWARDS)[0] == 200
+except OSError:
+    rewards_up = False
+    print("R. rewards-service is not running: skipping the Phase 5 checks")
+if rewards_up:
+    # Phase 5: first add-money of 500+ earns 25; P2P payments of 100+ earn scratch cards (max 3 a day)
+    cards = wait_for(lambda: (lambda r: r["items"] if len(r["items"]) == 3 else None)(
+        call("GET", "/api/v1/rewards/scratch-cards", a["token"])[1]), "3 scratch cards")
+    print("R1. A has", len(cards), "scratch cards (daily cap 3), amounts hidden:", all(c["amount"] is None for c in cards))
+    won = 0.0
+    for c in cards:
+        s, sc = call("POST", f"/api/v1/rewards/scratch-cards/{c['id']}/scratch", a["token"])
+        won += float(sc["amount"]["amount"])
+    s, cp = call("POST", "/api/v1/rewards/coupons/PAYVERSE10/redeem", b["token"])
+    s2, again = call("POST", "/api/v1/rewards/coupons/PAYVERSE10/redeem", b["token"])
+    print(f"R2. A scratched INR {won:.2f}; B redeemed PAYVERSE10: {s}, again: {again['code']}")
+    code = call("GET", "/api/v1/rewards/referral", a["token"])[1]["code"]
+    c = signup("Meera", code, AUTH)
+    wait_for(lambda: credited(c) >= 50, "referee bonus")
+    cashback_a, cashback_b = 25 + won + 100, 10.0
+    wait_for(lambda: abs(credited(a) - cashback_a) < 0.001 and credited(b) >= 10, "cashback credits")
+    print(f"R3. C signed up with A's code {code} + KYC: A +100, C +50 | A cashback total {credited(a):.2f}")
+    inbox = wait_for(lambda: (lambda r: r if r["items"] else None)(call("GET", "/api/v1/notifications/me?size=50", b["token"])[1]),
+                     "B notifications")
+    bodies = [n["templateCode"] + "/" + n["channel"] for n in inbox["items"]]
+    assert "PAYMENT_RECEIVED/PUSH" in bodies, bodies
+    a_inbox = call("GET", "/api/v1/notifications/me?size=100", a["token"])[1]
+    a_codes = {n["templateCode"] for n in a_inbox["items"]}
+    assert {"PAYMENT_SENT", "SCRATCH_CARD_WON", "CASHBACK_CREDITED", "MONEY_ADDED"} <= a_codes, a_codes
+    print("R4. notifications: B", inbox["unread"], "unread; A got", sorted(a_codes))
+
 ba, bb = balance(a), balance(b)
-expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1
-expected_b = 1200.50 + 300 + 149.50 + 250 + 99.99 + 50 + 1
+expected_a = 5000 - 1200.50 - 300 - 149.50 - 250 - 99.99 - 50 - 1 + cashback_a
+expected_b = 1200.50 + 300 + 149.50 + 250 + 99.99 + 50 + 1 + cashback_b
 print(f"11. balances A={ba} (expected {expected_a:.2f})  B={bb} (expected {expected_b:.2f})")
 assert ba == f"{expected_a:.2f}" and bb == f"{expected_b:.2f}"
 s, integ = call("GET", "/internal/wallets/integrity", svc, base=WALLET)

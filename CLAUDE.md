@@ -12,8 +12,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 2 | auth-service + user-service | ✅ done 2026-10-14 |
 | 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ✅ done 2026-10-14 |
 | 4 | transaction-service + payment-service (saga, UPI sim, QR) | ✅ done 2026-10-17 |
-| 5 | notification-service + rewards-service | ⏳ next |
-| 6 | bill-payment-service + fraud-risk-service | |
+| 5 | notification-service + rewards-service | ✅ done 2026-10-17 |
+| 6 | bill-payment-service + fraud-risk-service | ⏳ next |
 | 7 | reconciliation-service + admin-service | |
 | 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | |
 
@@ -106,6 +106,29 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - OpenPDF 3 package is `org.openpdf.text` (not `com.lowagie`).
 - `e2e/smoke.py` (`make smoke`): live two-user scenario across six services; asserts exact balances + ledger integrity.
 
+## Phase 5 decisions
+
+- notification-service: one PENDING row per (event, user, template, channel) — `UNIQUE` + `ProcessedEventGuard`.
+  `NotificationDispatcher` (1s) sends each under a row lock in its own transaction; back-off 5s·2^n, DEAD after 5
+  attempts; admins requeue (`/api/v1/admin/notifications/{id}/retry`). Templates in DB with `{{name}}` placeholders;
+  values are stripped of braces/control chars. MOCK providers log; `NOTIFICATION_MOCK_FAILING_CHANNELS=EMAIL` forces failures.
+- Dead-letter desk lives in notification-service: `topicPattern = payverse\..*\.dlt` captures every service's DLT
+  (`dead_letter_events`, with original consumer group + error); admin replay re-publishes to the original topic.
+  Its own container factory retries forever (no `.dlt.dlt`). Pattern subscriptions see new topics after
+  `metadata.max.age.ms` (30s; 1s in tests).
+- rewards-service: rule conditions are typed columns, not jsonb (validated by DB checks and `CashbackRule`). First
+  matching rule with budget wins, one reward per event. Budget reserved with an atomic `UPDATE … WHERE spent + x <= budget`;
+  `spent` is read-only in the entity + `@DynamicUpdate`, so admin edits never overwrite it.
+- Cashback credit: reward rows PENDING_CREDIT → `RewardCreditService` (1s) → wallet `credit` purpose CASHBACK, key
+  `reward:<id>` → CREDITED + `rewards.cashback-granted` (a fact). Wallet calls never happen inside a DB transaction,
+  except clawback (`reward:<id>:clawback`, inside the consumer transaction; redelivery replays it).
+- Scratch/redeem endpoints take no Idempotency-Key: both are naturally idempotent and only create a reward.
+- Referral codes: 8 chars from an alphabet without look-alikes; `UserRegistered.referralCode` is the code the new
+  user entered. Bonus on the first upgrade to MIN_KYC/FULL_KYC (referrer 100, referee 50).
+- New event `rewards.scratch-card-issued` (→ notification SCRATCH_CARD_WON).
+- WireMock `matchingJsonPath("$.amount", equalTo("1.00"))` fails for numeric JSON (read as 1.0): use a filter
+  expression `$[?(@.amount == 1.00)]`.
+
 ## Conventions
 
 - **Package layout (layered, requested by the user on 2026-10-14 — replaces the hexagonal layout of the brief):**
@@ -172,9 +195,9 @@ make env && make infra-up        # infra (Postgres, Redis, Kafka + topics, Grafa
 ./mvnw verify                    # everything (needs Docker); `make test` = unit only
 make run-api-gateway             # run a service from source (loads .env, logs to .run/<service>.log)
 make otp                         # latest MOCK OTPs from the auth-service log
-make smoke                       # live end-to-end scenario (auth, user, wallet, payment, transaction + gateway running)
+make smoke                       # live end-to-end scenario (all services + gateway running; Phase 5 part needs rewards + notification)
 make env-upgrade                 # add settings introduced by later phases to an existing .env
-make build && docker compose --profile infra --profile core --profile payments up -d   # services in Docker
+make build && docker compose --profile infra --profile core --profile payments --profile extras up -d   # services in Docker
 make ps                          # containers + memory
 ```
 

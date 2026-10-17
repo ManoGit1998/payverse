@@ -403,6 +403,13 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
   wallet keeps the user-facing add-money API. Webhook-style async PG callbacks are not simulated. `PgChargeSettled.userId`
   replaces `walletId`.
 
+- Phase 5: rewards rule conditions are typed columns instead of `conditions jsonb`; `rewards` is the rewards ledger
+  (PENDING_CREDIT → CREDITED, VOIDED, CLAWED_BACK…), plus `user_activity` for first-time rules and `referral_codes`.
+  Cashback is credited by rewards-service through the wallet's internal credit API (purpose CASHBACK, D1) and
+  `cashback-granted` is published afterwards as a fact — wallet does not consume it. New event
+  `rewards.scratch-card-issued`. The platform dead-letter desk (capture + replay of every `.dlt`) lives in
+  notification-service.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?
