@@ -42,7 +42,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
         "payverse.auth.admin-mobiles=9000000001",
         "payverse.auth.service-clients[0].id=transaction-service",
-        "payverse.auth.service-clients[0].secret=it-secret"
+        "payverse.auth.service-clients[0].secret=it-secret",
+        "payverse.auth.service-clients[1].id=admin-service",
+        "payverse.auth.service-clients[1].secret=it-secret"
 })
 @ActiveProfiles("it")
 @AutoConfigureMockMvc
@@ -103,9 +105,13 @@ class AuthServiceIT {
     }
 
     String serviceToken() throws Exception {
+        return serviceToken("transaction-service");
+    }
+
+    String serviceToken(String clientId) throws Exception {
         String body = mvc.perform(post("/api/v1/auth/oauth/token").contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("grant_type", "client_credentials")
-                        .param("client_id", "transaction-service")
+                        .param("client_id", clientId)
                         .param("client_secret", "it-secret"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token_type").value("Bearer"))
@@ -296,6 +302,18 @@ class AuthServiceIT {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"mobile\":\"" + randomMobile() + "\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("AUTH_USER_NOT_FOUND"));
+    }
+
+    @Test
+    void onlyAdminServiceRotatesSigningKeysAndOldTokensKeepWorking() throws Exception {
+        Session session = login(randomMobile(), "device-" + UUID.randomUUID());
+        mvc.perform(post("/internal/auth/signing-keys/rotate").header(HttpHeaders.AUTHORIZATION, serviceToken()))
+                .andExpect(status().isForbidden());
+        String kid = com.jayway.jsonpath.JsonPath.read(mvc.perform(post("/internal/auth/signing-keys/rotate")
+                        .header(HttpHeaders.AUTHORIZATION, serviceToken("admin-service")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.kid");
+        mvc.perform(get("/.well-known/jwks.json")).andExpect(jsonPath("$.keys[?(@.kid == '" + kid + "')]").isNotEmpty());
+        mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, session.bearer())).andExpect(status().isOk());
     }
 
     @Test
