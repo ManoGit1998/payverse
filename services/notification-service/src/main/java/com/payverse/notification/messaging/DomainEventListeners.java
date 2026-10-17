@@ -3,6 +3,8 @@ package com.payverse.notification.messaging;
 import com.payverse.common.events.EventEnvelope;
 import com.payverse.common.events.Topics;
 import com.payverse.common.events.payload.AuthEvents;
+import com.payverse.common.events.payload.BillEvents;
+import com.payverse.common.events.payload.FraudEvents;
 import com.payverse.common.events.payload.PaymentEvents;
 import com.payverse.common.events.payload.RewardsEvents;
 import com.payverse.common.events.payload.TransactionEvents;
@@ -105,6 +107,26 @@ public class DomainEventListeners {
     @KafkaListener(topics = Topics.REWARDS_SCRATCH_CARD_ISSUED, groupId = GROUP)
     public void onScratchCardIssued(String message) {
         handle(message, RewardsEvents.ScratchCardIssued.class, EventNotifications::scratchCardIssued);
+    }
+
+    @KafkaListener(topics = Topics.BILL_PAYMENT_COMPLETED, groupId = GROUP)
+    public void onBillPaid(String message) {
+        handle(message, BillEvents.BillPaymentCompleted.class, EventNotifications::billPaid);
+    }
+
+    @KafkaListener(topics = Topics.BILL_PAYMENT_FAILED, groupId = GROUP)
+    public void onBillFailed(String message) {
+        handle(message, BillEvents.BillPaymentFailed.class, EventNotifications::billFailed);
+    }
+
+    @KafkaListener(topics = Topics.BILL_MANDATE_EXECUTED, groupId = GROUP)
+    public void onMandateExecuted(String message) {
+        handle(message, BillEvents.MandateExecuted.class, EventNotifications::mandateExecuted);
+    }
+
+    @KafkaListener(topics = Topics.FRAUD_TRANSACTION_FLAGGED, groupId = GROUP)
+    public void onTransactionFlagged(String message) {
+        handle(message, FraudEvents.TransactionFlagged.class, EventNotifications::transactionFlagged);
     }
 
     private <T> void handle(String message, Class<T> type, BiFunction<UUID, T, List<NotificationRequest>> mapping) {

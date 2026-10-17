@@ -2,6 +2,8 @@ package com.payverse.notification.service;
 
 import com.payverse.common.events.Amount;
 import com.payverse.common.events.payload.AuthEvents;
+import com.payverse.common.events.payload.BillEvents;
+import com.payverse.common.events.payload.FraudEvents;
 import com.payverse.common.events.payload.PaymentEvents;
 import com.payverse.common.events.payload.RewardsEvents;
 import com.payverse.common.events.payload.TransactionEvents;
@@ -102,6 +104,33 @@ public final class EventNotifications {
 
     public static List<NotificationRequest> scratchCardIssued(UUID eventId, RewardsEvents.ScratchCardIssued e) {
         return List.of(new NotificationRequest(eventId, e.userId(), "SCRATCH_CARD_WON", Map.of("expiresAt", time(e.expiresAt()))));
+    }
+
+    public static List<NotificationRequest> billPaid(UUID eventId, BillEvents.BillPaymentCompleted e) {
+        return List.of(new NotificationRequest(eventId, e.userId(), "BILL_PAID", Map.of("amount", amount(e.amount()),
+                "biller", nullToEmpty(e.billerName()), "reference", nullToEmpty(e.billerReference()))));
+    }
+
+    public static List<NotificationRequest> billFailed(UUID eventId, BillEvents.BillPaymentFailed e) {
+        return List.of(new NotificationRequest(eventId, e.userId(), "BILL_PAYMENT_FAILED", Map.of("amount", amount(e.amount()),
+                "category", e.category() == null ? "bill" : e.category().toLowerCase(Locale.ROOT).replace('_', ' '),
+                "reason", reason(e.reasonCode()))));
+    }
+
+    /** Successful runs are covered by BILL_PAID; only failed or skipped runs need attention. */
+    public static List<NotificationRequest> mandateExecuted(UUID eventId, BillEvents.MandateExecuted e) {
+        if ("SUCCESS".equals(e.status()) || "PENDING".equals(e.status())) {
+            return List.of();
+        }
+        return List.of(new NotificationRequest(eventId, e.userId(), "AUTOPAY_FAILED", Map.of("status", e.status().toLowerCase(Locale.ROOT))));
+    }
+
+    /** Users hear about blocks only; REVIEW flags are an internal matter. */
+    public static List<NotificationRequest> transactionFlagged(UUID eventId, FraudEvents.TransactionFlagged e) {
+        if (!"BLOCK".equals(e.decision())) {
+            return List.of();
+        }
+        return List.of(new NotificationRequest(eventId, e.userId(), "PAYMENT_BLOCKED", Map.of()));
     }
 
     static String amount(Amount amount) {

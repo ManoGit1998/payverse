@@ -2,6 +2,8 @@ package com.payverse.notification.service;
 
 import com.payverse.common.events.Amount;
 import com.payverse.common.events.payload.AuthEvents;
+import com.payverse.common.events.payload.BillEvents;
+import com.payverse.common.events.payload.FraudEvents;
 import com.payverse.common.events.payload.PaymentEvents;
 import com.payverse.common.events.payload.RewardsEvents;
 import com.payverse.common.events.payload.TransactionEvents;
@@ -91,6 +93,21 @@ class EventNotificationsTest {
                 .singleElement().satisfies(r -> assertRequest(r, U1, "CASHBACK_CREDITED"));
         assertThat(EventNotifications.scratchCardIssued(EVENT, new RewardsEvents.ScratchCardIssued(UUID.randomUUID(), U1, "TXN", "x", "R", AT))
                 .getFirst().vars()).containsEntry("expiresAt", "17 Oct 2026, 15:30 IST");
+    }
+
+    @Test
+    void billAndFraudEvents() {
+        assertThat(EventNotifications.billPaid(EVENT, new BillEvents.BillPaymentCompleted(UUID.randomUUID(), U1, "ELECTRICITY", "City Power",
+                AMOUNT, "MOCKBBPS-1")).getFirst().vars()).containsEntry("biller", "City Power").containsEntry("reference", "MOCKBBPS-1");
+        assertThat(EventNotifications.billFailed(EVENT, new BillEvents.BillPaymentFailed(UUID.randomUUID(), U1, "CREDIT_CARD", AMOUNT,
+                "BILL_BILLER_DECLINED")).getFirst().vars()).containsEntry("category", "credit card").containsEntry("reason", "biller declined");
+        assertThat(EventNotifications.mandateExecuted(EVENT, new BillEvents.MandateExecuted(UUID.randomUUID(), U1, null, "SUCCESS"))).isEmpty();
+        assertThat(EventNotifications.mandateExecuted(EVENT, new BillEvents.MandateExecuted(UUID.randomUUID(), U1, null, "SKIPPED")))
+                .singleElement().satisfies(r -> assertThat(r.vars()).containsEntry("status", "skipped"));
+        assertThat(EventNotifications.transactionFlagged(EVENT, new FraudEvents.TransactionFlagged(UUID.randomUUID(), UUID.randomUUID(), U1,
+                60, "REVIEW", List.of("X")))).isEmpty();
+        assertThat(EventNotifications.transactionFlagged(EVENT, new FraudEvents.TransactionFlagged(UUID.randomUUID(), UUID.randomUUID(), U1,
+                90, "BLOCK", List.of("X")))).singleElement().satisfies(r -> assertRequest(r, U1, "PAYMENT_BLOCKED"));
     }
 
     @Test

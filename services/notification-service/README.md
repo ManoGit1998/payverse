@@ -32,6 +32,9 @@ domain event (Kafka) ─▶ DomainEventListeners ─▶ NotificationService.enqu
 | transaction.money-requested | MONEY_REQUESTED | PUSH |
 | payment.collect-requested | COLLECT_REQUESTED | PUSH |
 | rewards.cashback-granted / scratch-card-issued | CASHBACK_CREDITED / SCRATCH_CARD_WON | PUSH |
+| bill.payment-completed / payment-failed | BILL_PAID / BILL_PAYMENT_FAILED | PUSH, SMS / PUSH |
+| bill.mandate-executed (FAILED or SKIPPED only) | AUTOPAY_FAILED | PUSH, EMAIL |
+| fraud.transaction-flagged (BLOCK only) | PAYMENT_BLOCKED | SMS, PUSH |
 
 - **Idempotent:** `ProcessedEventGuard` per event, plus `UNIQUE(event_id, user_id, template_code, channel)`.
 - **Templates** live in the `templates` table (seeded by `V1__`). `{{name}}` placeholders; event
