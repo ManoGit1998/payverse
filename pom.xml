@@ -35,6 +35,7 @@
         <module>services/notification-service</module>
         <module>services/rewards-service</module>
         <module>services/fraud-risk-service</module>
+        <module>services/bill-payment-service</module>
     </modules>
 
     <properties>

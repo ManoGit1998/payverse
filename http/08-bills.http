@@ -1,0 +1,77 @@
+### PayVerse — bill-payment-service through the gateway (all billers are MOCK).
+### MockBillerAdapter: accounts ending in 0000 don't exist; amounts ending in .13 are declined (refunded);
+### amounts ending in .14 time out once (the payment stays PENDING and the recovery job finishes it).
+
+### Billers by category (MOBILE, ELECTRICITY, DTH, FASTAG, CREDIT_CARD)
+GET {{gateway}}/api/v1/billers?category=ELECTRICITY
+Authorization: Bearer {{accessToken}}
+
+### Fetch the current electricity bill
+POST {{gateway}}/api/v1/bills/fetch
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "billerCode": "CITY_POWER", "accountRef": "1234567890" }
+
+> {% client.global.set("billAmount", response.body.amountDue.amount); %}
+
+### Pay it (201 SUCCESS/FAILED, 202 PENDING, 200 replay)
+POST {{gateway}}/api/v1/bills/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "billerCode": "CITY_POWER", "accountRef": "1234567890", "amount": {{billAmount}} }
+
+### Mobile recharge (no bill to fetch)
+POST {{gateway}}/api/v1/bills/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "billerCode": "VOLTEL_PREPAID", "accountRef": "9876543210", "amount": 299 }
+
+### A declined recharge (.13): debited, then refunded — status FAILED, refunded true
+POST {{gateway}}/api/v1/bills/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "billerCode": "VOLTEL_PREPAID", "accountRef": "9876543210", "amount": 199.13 }
+
+### Bill history
+GET {{gateway}}/api/v1/bills/history?page=0&size=20
+Authorization: Bearer {{accessToken}}
+
+### Auto-pay the electricity bill monthly, up to INR 3,000 (the PIN is the consent)
+POST {{gateway}}/api/v1/mandates
+Authorization: Bearer {{accessToken}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "billerCode": "CITY_POWER", "accountRef": "1234567890", "frequency": "MONTHLY", "maxAmount": 3000 }
+
+> {% client.global.set("mandateId", response.body.id); %}
+
+### Auto-recharge FASTag weekly with INR 500
+POST {{gateway}}/api/v1/mandates
+Authorization: Bearer {{accessToken}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "billerCode": "HIGHWAY_TAG", "accountRef": "KA01AB1234", "frequency": "WEEKLY", "maxAmount": 500, "amount": 500 }
+
+### My mandates
+GET {{gateway}}/api/v1/mandates
+Authorization: Bearer {{accessToken}}
+
+### Runs of a mandate (the scheduler checks every minute)
+GET {{gateway}}/api/v1/mandates/{{mandateId}}/executions
+Authorization: Bearer {{accessToken}}
+
+### Cancel it
+DELETE {{gateway}}/api/v1/mandates/{{mandateId}}
+Authorization: Bearer {{accessToken}}
