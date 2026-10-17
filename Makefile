@@ -10,6 +10,13 @@ SERVICES   := api-gateway auth-service user-service wallet-service transaction-s
               bill-payment-service rewards-service notification-service fraud-risk-service \
               reconciliation-service admin-service
 
+# Testcontainers looks for /var/run/docker.sock, which OrbStack/Docker Desktop do not always create.
+# Point it at the active Docker context instead (keeps working after restarts).
+ifeq ($(DOCKER_HOST),)
+export DOCKER_HOST := $(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)
+endif
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE ?= /var/run/docker.sock
+
 # Load .env (if present) and export it to `mvn spring-boot:run`
 ifneq (,$(wildcard .env))
 include .env
@@ -115,6 +122,10 @@ docker-prune: ## Remove dangling images, stopped containers and build cache
 	docker container prune -f
 	docker image prune -f
 	docker builder prune -f
+
+.PHONY: smoke
+smoke: ## Live smoke test of auth/user/wallet/payment/transaction through the gateway (services must be running)
+	python3 e2e/smoke.py
 
 .PHONY: e2e
 e2e: ## End-to-end scenario (implemented in Phase 8)

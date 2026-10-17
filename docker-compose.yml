@@ -186,7 +186,24 @@ services:
     image: payverse/wallet-service:local
     ports: ["8083:8083"]
 
-  # payments/extras profiles are added in Phases 4–7.
+  # ---------------------------------------------------------------- payments
+  transaction-service:
+    <<: *service-defaults
+    profiles: [payments]
+    build:
+      context: ./services/transaction-service
+    image: payverse/transaction-service:local
+    ports: ["8084:8084"]
+
+  payment-service:
+    <<: *service-defaults
+    profiles: [payments]
+    build:
+      context: ./services/payment-service
+    image: payverse/payment-service:local
+    ports: ["8085:8085"]
+
+  # fraud-risk / bill-payment (payments) and the extras profile are added in Phases 5–7.
 
 volumes:
   postgres-data:
