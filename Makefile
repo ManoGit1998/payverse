@@ -84,8 +84,12 @@ env-upgrade: ## Append settings added in later phases to an existing .env (never
 	done
 
 .PHONY: otp
-otp: ## Show the latest MOCK OTPs from auth-service logs (Docker or local run log)
-	@{ docker logs payverse-auth-service-1 2>/dev/null; cat .run/auth-service.log 2>/dev/null; } | grep -o '\[MOCK SMS\][^"]*' | tail -5
+otp: ## Show the latest MOCK OTPs from auth-service logs (the running container, else the local run log)
+	@if [ "$$(docker inspect -f '{{.State.Running}}' payverse-auth-service-1 2>/dev/null)" = "true" ]; then \
+		src="the auth-service container"; log=$$(docker logs payverse-auth-service-1 2>&1); \
+	else src=".run/auth-service.log"; log=$$(cat .run/auth-service.log 2>/dev/null); fi; \
+	otps=$$(echo "$$log" | grep -o '\[MOCK SMS\][^"]*' | tail -5); \
+	echo "OTPs from $$src:"; echo "$${otps:-  none yet — request one in the app first}"
 
 .PHONY: topics
 topics: ## List Kafka topics

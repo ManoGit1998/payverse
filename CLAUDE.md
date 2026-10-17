@@ -202,7 +202,8 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 
 - React 19 + TypeScript 5.8 + Vite 6 + React Router 7 + TanStack Query 5 (pinned to well-known majors, not the newest
   React Router 8 / Vite 8 / TS 7). Plain CSS tokens (light/dark), no UI library. Vitest 3 + Testing Library.
-- Talks to the gateway only (`/api/v1`); Vite proxies `/api` in dev (port 5173 — Grafana owns 3000).
+- Talks to the gateway only (`/api/v1`); Vite proxies `/api` in dev (port 5173 — Grafana owns 3000) and strips the
+  browser's `Origin` header, otherwise the gateway CORS filter answers 403 (only `CORS_ALLOWED_ORIGINS` pass).
 - `src/api/client.ts`: memory access token + localStorage refresh token, single-flight refresh, and a retry without refreshing
   when another request already rotated the token (a `setTimeout`-cleared promise caused a stale-promise race — fixed).
   `useIdempotencyKey`: one key per payload. Mutations never auto-retry. PIN asked per action via `usePin()`.
