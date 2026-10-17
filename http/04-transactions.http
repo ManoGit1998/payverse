@@ -1,0 +1,89 @@
+### PayVerse — transaction-service through the gateway. Prerequisites: 01-auth.http (token, PIN 4826),
+### 02-user.http (min KYC) and 03-wallet.http (add money) for the payer; the payee also needs min KYC.
+
+### Pay by UPI ID (201 SUCCESS/FAILED, 202 PENDING while the saga finishes, 200 when replayed)
+POST {{gateway}}/api/v1/transfers
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "payee": { "type": "VPA", "value": "{{payeeVpa}}" }, "amount": 250.00, "note": "Dinner" }
+
+> {% client.global.set("transactionId", response.body.transactionId); %}
+
+### Pay by mobile number
+POST {{gateway}}/api/v1/transfers
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "payee": { "type": "MOBILE", "value": "{{payeeMobile}}" }, "amount": 100.00 }
+
+### Pay a scanned QR (dynamic QRs carry the amount — omit it; see 05-payments.http to create one)
+POST {{gateway}}/api/v1/transfers
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+Content-Type: application/json
+
+{ "payee": { "type": "QR", "value": "upi://pay?pa={{payeeVpa}}&am=149.50&cu=INR" } }
+
+### Transfer status (poll while PENDING)
+GET {{gateway}}/api/v1/transfers/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### History with filters
+GET {{gateway}}/api/v1/transactions?direction=SENT&status=SUCCESS&minAmount=100&page=0&size=20&sort=createdAt&order=DESC
+Authorization: Bearer {{accessToken}}
+
+### One transaction + status history
+GET {{gateway}}/api/v1/transactions/{{transactionId}}
+Authorization: Bearer {{accessToken}}
+
+### Statement (CSV or PDF, max 1 year)
+GET {{gateway}}/api/v1/transactions/statement?from=2026-10-01T00:00:00Z&format=pdf
+Authorization: Bearer {{accessToken}}
+
+### Request money (by MOBILE or VPA)
+POST {{gateway}}/api/v1/money-requests
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "payer": { "type": "VPA", "value": "{{payeeVpa}}" }, "amount": 300.00, "note": "Movie tickets" }
+
+> {% client.global.set("moneyRequestId", response.body.id); %}
+
+### Requests made to me / by me
+GET {{gateway}}/api/v1/money-requests?direction=INCOMING
+Authorization: Bearer {{accessToken}}
+
+### Pay a request made to me
+POST {{gateway}}/api/v1/money-requests/{{moneyRequestId}}/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+
+### Decline (payer) / cancel (requester)
+POST {{gateway}}/api/v1/money-requests/{{moneyRequestId}}/decline
+Authorization: Bearer {{accessToken}}
+
+###
+POST {{gateway}}/api/v1/money-requests/{{moneyRequestId}}/cancel
+Authorization: Bearer {{accessToken}}
+
+### Split a bill equally with two friends (I am included: 1000 → 333.34 / 333.33 / 333.33)
+POST {{gateway}}/api/v1/split-bills
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "total": 1000.00, "note": "Goa trip", "participants": [
+    { "type": "VPA", "value": "{{payeeVpa}}" },
+    { "type": "MOBILE", "value": "{{payeeMobile}}" } ] }
+
+> {% client.global.set("splitId", response.body.id); %}
+
+### Split status
+GET {{gateway}}/api/v1/split-bills/{{splitId}}
+Authorization: Bearer {{accessToken}}

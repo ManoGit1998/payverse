@@ -398,6 +398,11 @@ Each phase ends with: `mvn verify` green → CLAUDE.md updated → small logical
 - Phase 3: tier NONE has zero wallet limits (KYC required to move money). Internal wallet APIs are addressed by
   `userId` (one wallet per user). Freeze blocks debits and new credits; reversals still apply.
 
+- Phase 4: saga state lives on the `transactions` row (`saga_step`, retry fields) instead of a separate
+  `saga_instances` table. Transfer idempotency uses `UNIQUE(payer, key)`. payment-service owns PG charges (`/internal/pg/charges`);
+  wallet keeps the user-facing add-money API. Webhook-style async PG callbacks are not simulated. `PgChargeSettled.userId`
+  replaces `walletId`.
+
 ## 10. Questions for you
 
 1. Approve decisions **D1–D11** (especially D1 sync-REST saga, D5 JSON events without Schema Registry, D6 polling outbox)?

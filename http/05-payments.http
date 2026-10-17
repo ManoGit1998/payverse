@@ -1,0 +1,63 @@
+### PayVerse — payment-service (simulated UPI) through the gateway. Run 01-auth.http steps 1–2 first.
+
+### My UPI IDs (the default pv…@payverse ID is created on sign-up)
+GET {{gateway}}/api/v1/vpa/me
+Authorization: Bearer {{accessToken}}
+
+### Create a custom UPI ID (max 3)
+POST {{gateway}}/api/v1/vpa
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "name": "asha.verma" }
+
+### Verify a UPI ID before paying (MOCK switch: only @payverse IDs exist)
+GET {{gateway}}/api/v1/vpa/{{payeeVpa}}/resolve
+Authorization: Bearer {{accessToken}}
+
+### My static QR (any amount)
+POST {{gateway}}/api/v1/qr/static
+Authorization: Bearer {{accessToken}}
+
+### A dynamic QR for 149.50, valid 15 minutes
+POST {{gateway}}/api/v1/qr/dynamic
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "amount": 149.50, "note": "Coffee", "validityMinutes": 15 }
+
+> {% client.global.set("qrId", response.body.id); %}
+
+### QR image (PNG)
+GET {{gateway}}/api/v1/qr/{{qrId}}.png
+Authorization: Bearer {{accessToken}}
+
+### Decode a scanned payload
+POST {{gateway}}/api/v1/qr/decode
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "payload": "upi://pay?pa={{payeeVpa}}&am=149.50&cu=INR" }
+
+### Collect: ask a UPI ID for money (the payer approves with their PIN)
+POST {{gateway}}/api/v1/collect-requests
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "payerVpa": "{{payeeVpa}}", "amount": 99.99, "note": "Snacks" }
+
+> {% client.global.set("collectId", response.body.id); %}
+
+### Collect requests waiting for me to pay
+GET {{gateway}}/api/v1/collect-requests?direction=INCOMING
+Authorization: Bearer {{accessToken}}
+
+### Approve (as the payer) — moves money through transaction-service
+POST {{gateway}}/api/v1/collect-requests/{{collectId}}/approve
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{$uuid}}
+X-Txn-Pin: 4826
+
+### Reject (as the payer)
+POST {{gateway}}/api/v1/collect-requests/{{collectId}}/reject
+Authorization: Bearer {{accessToken}}

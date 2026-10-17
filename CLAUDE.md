@@ -11,8 +11,8 @@ Read this first in a new session. The original brief is `PROMPT.md`; the approve
 | 1 | Parent POM, shared libs, api-gateway, docker-compose, Makefile | ✅ done 2026-10-13 |
 | 2 | auth-service + user-service | ✅ done 2026-10-14 |
 | 3 | wallet-service (double-entry ledger, idempotency, concurrency test) | ✅ done 2026-10-14 |
-| 4 | transaction-service + payment-service (saga, UPI sim, QR) | ⏳ next |
-| 5 | notification-service + rewards-service | |
+| 4 | transaction-service + payment-service (saga, UPI sim, QR) | ✅ done 2026-10-17 |
+| 5 | notification-service + rewards-service | ⏳ next |
 | 6 | bill-payment-service + fraud-risk-service | |
 | 7 | reconciliation-service + admin-service | |
 | 8 | Dashboards, k6, K8s/Helm, GitHub Actions, `make e2e` | |
@@ -57,7 +57,7 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - `@Transactional(noRollbackFor = PayverseException.class)` wherever a failed attempt must be persisted (PIN failures, refresh reuse revocation, KYC rejections).
 - Docker Postgres is published on host port **5433** (`POSTGRES_PORT`): the dev Mac runs a native PostgreSQL 18 on 5432.
 - Service containers: `mem_limit 512m`, `-Xmx256m`, capped metaspace / code cache / direct memory, `MALLOC_ARENA_MAX=2`
-  (measured RSS: gateway ~345 MiB, auth/user ~395 MiB, wallet ~430 MiB).
+  (measured RSS: gateway ~345 MiB, auth/user ~395 MiB, wallet ~430 MiB, payment ~405 MiB, transaction ~430 MiB).
 - JaCoCo `check` fails the build if any `com.payverse.*.service*`, `*.entity*` or `*.model*` package is under 80% line
   coverage (skipped automatically with `-DskipTests`).
 
@@ -81,6 +81,30 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   3s time limit, only 5xx/IO failures count). PIN verification is never retried (attempts count toward lockout).
 - Flyway `out-of-order: true` in every service, because shared `db/common` migrations can be added after a service's V1.
 - Hibernate: map `CHAR(n)` columns with `@JdbcTypeCode(SqlTypes.CHAR)` (schema validation is on).
+
+## Phase 4 decisions
+
+- Saga (transaction-service `TransferSaga`): INITIATED → risk → PENDING/NOT_STARTED → debit → DEBITED → credit →
+  SUCCESS, or credit refused → COMPENSATING → reverse → FAILED. Each wallet call is idempotent (`<txnId>:debit|credit|compensate`)
+  and each state change is its own committed transaction. `TransferService` is deliberately not `@Transactional`.
+- Retry classification: 4xx = business refusal (fail or compensate); 5xx/408/409/429 = retry with back-off
+  (2^n s, max 5 min). `SagaRecoveryJob` runs every `recovery-interval-ms` (10s); `stale-after` (60s) resumes crashed sagas.
+  `SagaLock` (Redis SET NX) means one runner per saga.
+- Transfer idempotency is durable at the row level: `UNIQUE(payer_user_id, idempotency_key)` + `request_hash`
+  (no `IdempotencyService` here, because the saga commits mid-request). A replay of an unfinished saga nudges it forward.
+- Payees: MOBILE (auth lookup), VPA (payment-service, MOCK UPI switch `@payverse` only), QR (payment-service decode;
+  dynamic QR fixes the amount), USER (internal). Payees only ever see SUCCESS/REVERSED transactions.
+- Risk: `RiskAssessor` with `PermissiveRiskAssessor` (MOCK ALLOW) until fraud-risk-service (Phase 6).
+- payment-service owns PG charges now: wallet add money → `PaymentServiceGateway` → `POST /internal/pg/charges`
+  (idempotent per key, MOCK `.13` declines). wallet-service's own mock gateway was removed.
+- Collect approval → transaction-service `/internal/transfers` with key `collect:<collectId>` (approve twice = one transfer).
+  Collect status settles from `transaction.completed/failed` events. Completed transfers create `upi_switch_records`
+  (RRN) for reconciliation in Phase 7.
+- `PgChargeSettled` event payload now carries `userId` (was `walletId`).
+- RestClient URI templates percent-encode `@` in path variables (`ravi%40payverse`); Spring MVC decodes it. WireMock
+  stubs must use the encoded path.
+- OpenPDF 3 package is `org.openpdf.text` (not `com.lowagie`).
+- `e2e/smoke.py` (`make smoke`): live two-user scenario across six services; asserts exact balances + ledger integrity.
 
 ## Conventions
 
@@ -133,6 +157,14 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   OTLP, structured logs; copy auth-service's), the layered packages above, `README.md`, `http/NN-<service>.http`,
   `ArchitectureTest` (copy auth-service's), unit tests for entities/services and a Testcontainers `*IT`.
 
+## Troubleshooting
+
+- **Testcontainers: "Could not find a valid Docker environment"** after a reboot: OrbStack/Docker Desktop may not have
+  recreated `/var/run/docker.sock`. The Makefile exports `DOCKER_HOST` from the active Docker context; when running
+  `./mvnw` directly, use:
+  `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}') TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`.
+- Docker not running at all: `orb start` (OrbStack).
+
 ## Commands
 
 ```bash
@@ -140,8 +172,9 @@ make env && make infra-up        # infra (Postgres, Redis, Kafka + topics, Grafa
 ./mvnw verify                    # everything (needs Docker); `make test` = unit only
 make run-api-gateway             # run a service from source (loads .env, logs to .run/<service>.log)
 make otp                         # latest MOCK OTPs from the auth-service log
+make smoke                       # live end-to-end scenario (auth, user, wallet, payment, transaction + gateway running)
 make env-upgrade                 # add settings introduced by later phases to an existing .env
-make build && docker compose --profile infra --profile core up -d   # services in Docker
+make build && docker compose --profile infra --profile core --profile payments up -d   # services in Docker
 make ps                          # containers + memory
 ```
 
@@ -156,6 +189,8 @@ Grafana: http://localhost:3000 (admin/admin). Gateway: http://localhost:8080.
 - Access tokens stay valid until expiry (15m) after logout or device revocation; there is no deny-list yet.
 - No penny-drop / name-match verification when linking bank accounts (simulation).
 - `SigningKeyService.rotate()` exists but has no admin endpoint yet (admin-service, Phase 7).
+- Refunds of completed transfers (SUCCESS → REVERSED) come with admin-service in Phase 7.
+- Dynamic QRs are not single-use (they expire); a real PSP would mark them consumed.
 - Add money charges the mock gateway inside the request; if the commit failed after a successful charge, recon must
   refund it (Phase 7). Payouts are synchronous in the mock; a real adapter should go through the outbox.
 - Reversing a debit does not give back daily-limit usage (conservative).

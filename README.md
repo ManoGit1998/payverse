@@ -4,7 +4,7 @@ A PhonePe-style digital wallet and payments platform: Java 21, Spring Boot 4.1 m
 PostgreSQL, Redis, Kafka (KRaft) and OpenTelemetry. **No real money moves.** Every external
 integration (UPI switch, payment gateway, billers, SMS/e-mail) is a clearly named mock.
 
-> Status: **Phase 3 — wallet-service (double-entry ledger) complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
+> Status: **Phase 4 — transaction-service (saga) + payment-service (simulated UPI) complete.** See [CLAUDE.md](CLAUDE.md) for the phase tracker and
 > [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full architecture, event catalog and DB schemas.
 
 ## Architecture
@@ -57,7 +57,8 @@ flowchart LR
 | `services/auth-service` | OTP login, RS256 JWT + JWKS, refresh rotation, devices, Argon2 PIN | ✅ |
 | `services/user-service` | Profile, KYC tiers (mock), bank accounts, beneficiaries | ✅ |
 | `services/wallet-service` | Double-entry ledger, KYC limits, idempotent saga steps, freeze, concurrency-proven | ✅ |
-| transaction, payment | Phase 4 | ⏳ |
+| `services/transaction-service` | P2P by mobile / UPI ID / QR via an orchestrated saga, money requests, split bills, history, CSV/PDF statements | ✅ |
+| `services/payment-service` | VPAs, collect requests, static/dynamic QR (ZXing), MOCK UPI switch, MOCK payment gateway | ✅ |
 | notification, rewards | Phase 5 | ⏳ |
 | bill-payment, fraud-risk | Phase 6 | ⏳ |
 | reconciliation, admin | Phase 7 | ⏳ |
@@ -78,12 +79,16 @@ make verify              # all unit + Testcontainers integration tests
 make run-auth-service    # :8081   (each in its own terminal)
 make run-user-service    # :8082
 make run-wallet-service  # :8083
+make run-payment-service # :8085
+make run-transaction-service # :8084
+make smoke               # live two-user scenario through the gateway
 make run-api-gateway     # :8080
 make otp                 # read the MOCK OTP after requesting one
 ```
 
 Then open [http/01-auth.http](http/01-auth.http), [http/02-user.http](http/02-user.http) and
-[http/03-wallet.http](http/03-wallet.http) in IntelliJ or
+[http/03-wallet.http](http/03-wallet.http), [http/04-transactions.http](http/04-transactions.http) and
+[http/05-payments.http](http/05-payments.http) in IntelliJ or
 VS Code (REST Client) and run the requests with the `local` environment.
 
 > Postgres from Docker is published on **localhost:5433** (`POSTGRES_PORT`), because a native Postgres
@@ -106,6 +111,7 @@ VS Code (REST Client) and run the requests with the `local` environment.
 | `make build` / `test` / `verify` / `clean` | Maven lifecycle (verify = unit + integration + JaCoCo) |
 | `make ps` / `logs` / `topics` | Container status and memory, logs, Kafka topics |
 | `make otp` | Latest MOCK OTPs (auth-service log) |
+| `make smoke` | Live end-to-end scenario across the running services |
 | `make env-upgrade` | Add new settings to an existing `.env` |
 | `make testcontainers-reuse` | Enable Testcontainers container reuse |
 | `make docker-prune` | Clean dangling images, containers and build cache |
