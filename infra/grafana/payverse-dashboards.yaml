@@ -1,0 +1,10 @@
+# Mounted into grafana/otel-lgtm at /otel-lgtm/grafana/conf/provisioning/dashboards/payverse.yaml
+apiVersion: 1
+providers:
+  - name: PayVerse
+    folder: PayVerse
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/payverse-dashboards
