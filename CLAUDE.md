@@ -171,6 +171,9 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   `JobOperator.start` on a virtual thread. Packages moved in Batch 6: `org.springframework.batch.core.job.Job`,
   `...core.step.Step`, `...infrastructure.item.*`; `StepBuilder.chunk(int)` → `ChunkOrientedStepBuilder` + `.transactionManager()`.
 - MockMvc `get("/path?x=a%20b")` re-encodes `%` (→ `%2520`); pass query values with `.param(...)`.
+- Kafka does not order events across topics: rewards-service got `user.kyc-upgraded` before `auth.user-registered`
+  and lost the referral bonus. Fix: `kyc_qualified_users` (rewards V2) remembers qualification; a referral created
+  later pays out at once. Any consumer joining two topics needs this kind of "remember and reconcile" state.
 
 ## Conventions
 

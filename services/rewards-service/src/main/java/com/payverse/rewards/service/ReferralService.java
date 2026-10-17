@@ -7,6 +7,7 @@ import com.payverse.rewards.entity.ReferralCode;
 import com.payverse.rewards.entity.ReferralStatus;
 import com.payverse.rewards.entity.Reward;
 import com.payverse.rewards.entity.RewardSource;
+import com.payverse.rewards.repository.KycQualificationRepository;
 import com.payverse.rewards.repository.ReferralCodeRepository;
 import com.payverse.rewards.repository.ReferralRepository;
 import com.payverse.rewards.repository.RewardRepository;
@@ -40,15 +41,17 @@ public class ReferralService {
     private final ReferralCodeRepository codes;
     private final ReferralRepository referrals;
     private final RewardRepository rewards;
+    private final KycQualificationRepository kyc;
     private final RewardsProperties properties;
     private final RandomGenerator random;
     private final Clock clock;
 
-    public ReferralService(ReferralCodeRepository codes, ReferralRepository referrals, RewardRepository rewards, RewardsProperties properties,
-                           RandomGenerator random, Clock clock) {
+    public ReferralService(ReferralCodeRepository codes, ReferralRepository referrals, RewardRepository rewards, KycQualificationRepository kyc,
+                           RewardsProperties properties, RandomGenerator random, Clock clock) {
         this.codes = codes;
         this.referrals = referrals;
         this.rewards = rewards;
+        this.kyc = kyc;
         this.properties = properties;
         this.random = random;
         this.clock = clock;
@@ -66,7 +69,10 @@ public class ReferralService {
             log.info("Ignoring unknown or own referral code for user {}", userId);
             return;
         }
-        referrals.save(Referral.pending(referrer.get().getUserId(), userId, now));
+        Referral referral = referrals.save(Referral.pending(referrer.get().getUserId(), userId, now));
+        if (kyc.isQualified(userId)) {
+            payOut(referral, now); // the KYC event was processed first (different topics are not ordered)
+        }
     }
 
     @Transactional
@@ -74,16 +80,19 @@ public class ReferralService {
         if (!QUALIFYING_TIERS.contains(toTier)) {
             return Optional.empty();
         }
-        return referrals.findByRefereeId(userId).filter(Referral::isPending).map(referral -> {
-            Instant now = clock.instant();
-            String source = referral.getId().toString();
-            Reward referrerReward = rewards.save(Reward.pending(referral.getReferrerId(), REFERRER_RULE, RewardSource.REFERRAL, source,
-                    Money.inr(properties.referrerBonus()), now));
-            Reward refereeReward = rewards.save(Reward.pending(referral.getRefereeId(), REFEREE_RULE, RewardSource.REFERRAL, source,
-                    Money.inr(properties.refereeBonus()), now));
-            referral.reward(referrerReward.getId(), refereeReward.getId(), now);
-            return referral;
-        });
+        Instant now = clock.instant();
+        kyc.record(userId, toTier, now);
+        return referrals.findByRefereeId(userId).filter(Referral::isPending).map(referral -> payOut(referral, now));
+    }
+
+    private Referral payOut(Referral referral, Instant now) {
+        String source = referral.getId().toString();
+        Reward referrerReward = rewards.save(Reward.pending(referral.getReferrerId(), REFERRER_RULE, RewardSource.REFERRAL, source,
+                Money.inr(properties.referrerBonus()), now));
+        Reward refereeReward = rewards.save(Reward.pending(referral.getRefereeId(), REFEREE_RULE, RewardSource.REFERRAL, source,
+                Money.inr(properties.refereeBonus()), now));
+        referral.reward(referrerReward.getId(), refereeReward.getId(), now);
+        return referral;
     }
 
     @Transactional

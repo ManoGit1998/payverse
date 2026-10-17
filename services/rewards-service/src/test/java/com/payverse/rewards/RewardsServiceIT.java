@@ -255,6 +255,24 @@ class RewardsServiceIT {
     }
 
     @Test
+    void referralIsPaidEvenWhenKycArrivesBeforeRegistration() throws Exception {
+        UUID referrer = UUID.randomUUID();
+        send(envelope(EventType.USER_REGISTERED, referrer, new AuthEvents.UserRegistered(referrer, "98XXXXXX03", null)));
+        await().atMost(Duration.ofSeconds(30)).until(() -> count("SELECT count(*) FROM referral_codes WHERE user_id = ?", referrer) == 1);
+        String code = jdbc.queryForObject("SELECT code FROM referral_codes WHERE user_id = ?", String.class, referrer);
+
+        UUID referee = UUID.randomUUID();
+        send(envelope(EventType.KYC_UPGRADED, referee, new UserEvents.KycUpgraded(referee, "NONE", "MIN_KYC")));
+        await().atMost(Duration.ofSeconds(30)).until(() -> count("SELECT count(*) FROM kyc_qualified_users WHERE user_id = ?", referee) == 1);
+        send(envelope(EventType.USER_REGISTERED, referee, new AuthEvents.UserRegistered(referee, "98XXXXXX04", code)));
+
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            assertThat(jdbc.queryForObject("SELECT status FROM referrals WHERE referee_id = ?", String.class, referee)).isEqualTo("REWARDED");
+            assertThat(count("SELECT count(*) FROM rewards WHERE user_id IN (?, ?) AND status = 'CREDITED'", referrer, referee)).isEqualTo(2);
+        });
+    }
+
+    @Test
     void reversalClawsBackCreditedCashbackAndVoidsUnscratchedCards() throws Exception {
         UUID payer = UUID.randomUUID();
         UUID scratchedTxn = UUID.randomUUID();
