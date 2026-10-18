@@ -9,3 +9,6 @@ target/
 !.mvn/wrapper/maven-wrapper.properties
 load-tests/.users.json
 load-tests/results/
+
+# setup guide copy that contains local secrets (generated from .env)
+docs/*-with-passwords.docx

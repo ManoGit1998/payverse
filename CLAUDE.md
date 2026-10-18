@@ -175,6 +175,18 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   and lost the referral bonus. Fix: `kyc_qualified_users` (rewards V2) remembers qualification; a referral created
   later pays out at once. Any consumer joining two topics needs this kind of "remember and reconcile" state.
 
+## Live-test fixes (2026-10-19)
+
+- **Kafka listeners run on platform threads** (`OutboxAutoConfiguration.platformThreadKafkaListeners`, a `ContainerCustomizer`).
+  With `spring.threads.virtual.enabled`, Spring Kafka put each consumer loop on a virtual thread; the Kafka client blocks in
+  `synchronized` (ConsumerCoordinator), which pins carriers on Java 21. notification-service (19 listeners) pinned every
+  carrier, the virtual thread holding logback's console lock never resumed, and heartbeats, startup and the health check hung
+  (container unhealthy, inbox 503). Diagnose with `kill -3` (platform threads only); `jcmd` is not in the JRE image.
+- **Gateway DNS cache ≤ 10 s** (`HttpClientConfig`, `HttpClientCustomizer` + pool `max-idle-time`). reactor-netty's resolver
+  honours the record TTL; after `docker compose up` recreated a service with a new IP, the gateway kept dialing the old one and
+  the circuit breaker answered 503 until the gateway restarted.
+- Transaction labels: `TransactionMapper.payeeLabel` no longer doubles the name for USER payees (money requests).
+
 ## Phase 8 decisions
 
 - Business metrics without touching business code: `OutboxPublisher` counts each event after commit (`payverse.events`
@@ -211,7 +223,10 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   Note the two page shapes: `totalItems` (wallet/transaction/payment) vs `totalElements` (others).
 - Node ≥ 22 defines a global `localStorage` that shadows jsdom's: `src/test/setup.ts` installs an in-memory Storage.
 - npm 11 skips esbuild's postinstall; the platform binary comes from its optional dependency, builds work.
-- Not yet run against a live backend (services were intentionally kept down while building it).
+- Verified live on 2026-10-19: every customer and back-office flow driven through the browser against the Docker stack
+  (results and the workflow book: docs/PayVerse-Workflow-Book-with-passwords.docx, git-ignored — it holds .env secrets).
+- KYC upgrades reach the wallet asynchronously: `waitForWalletTier` polls briefly after KYC. Home/Wallet refetch the balance
+  every 15 s (cashback lands a second after a payment). Reads retry once (a hung service already costs the 10 s gateway timeout).
 
 ## Conventions
 
