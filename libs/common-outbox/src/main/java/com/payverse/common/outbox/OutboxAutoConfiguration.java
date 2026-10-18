@@ -12,7 +12,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.kafka.config.ContainerCustomizer;
 import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.DeserializationException;
@@ -81,5 +84,23 @@ public class OutboxAutoConfiguration {
         DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
         handler.addNotRetryableExceptions(DeserializationException.class, JacksonException.class, IllegalArgumentException.class);
         return handler;
+    }
+
+    /**
+     * Kafka consumer loops run on platform threads, even with {@code spring.threads.virtual.enabled}. The Kafka client
+     * blocks inside {@code synchronized} (ConsumerCoordinator), which pins a virtual thread to its carrier on Java 21.
+     * notification-service (19 listeners) pinned every carrier; the virtual thread holding logback's console lock could
+     * not resume and heartbeat threads, startup and the health endpoint all hung on logging.
+     */
+    @Bean
+    @ConditionalOnMissingBean(ContainerCustomizer.class)
+    @ConditionalOnBean(KafkaTemplate.class)
+    ContainerCustomizer<Object, Object, ConcurrentMessageListenerContainer<Object, Object>> platformThreadKafkaListeners() {
+        SimpleAsyncTaskExecutor platformThreads = new SimpleAsyncTaskExecutor("kafka-listener-");
+        return container -> usePlatformThreads(container, platformThreads);
+    }
+
+    static void usePlatformThreads(ConcurrentMessageListenerContainer<?, ?> container, SimpleAsyncTaskExecutor executor) {
+        container.getContainerProperties().setListenerTaskExecutor(executor);
     }
 }
