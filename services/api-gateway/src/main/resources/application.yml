@@ -28,6 +28,10 @@ spring:
           httpclient:
             connect-timeout: 2000
             response-timeout: 10s
+            pool:
+              # drop idle connections before a recreated service's old address can linger in the pool
+              max-idle-time: 30s
+              eviction-interval: 15s
           redis-rate-limiter:
             include-headers: true
           default-filters:
