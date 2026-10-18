@@ -12,8 +12,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,
-      // retry reads on network/5xx only; 4xx (incl. auth) are answers, not glitches
-      retry: (count, error) => count < 2 && (!(error instanceof ApiError) || error.status === 0 || error.status >= 500),
+      // retry reads once on network/5xx only (a hung service already costs the gateway timeout); 4xx are answers
+      retry: (count, error) => count < 1 && (!(error instanceof ApiError) || error.status === 0 || error.status >= 500),
       refetchOnWindowFocus: true,
     },
     mutations: { retry: false }, // money moves are never retried automatically

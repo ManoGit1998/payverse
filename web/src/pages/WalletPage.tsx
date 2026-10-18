@@ -13,7 +13,7 @@ type Tab = 'add' | 'withdraw' | 'ledger';
 export default function WalletPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'add';
-  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet });
+  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet, refetchInterval: 15_000 });
   return (
     <div className="stack">
       <PageHeader title="Wallet" subtitle={wallet.data ? <>Balance <strong>{formatMoney(wallet.data.balance)}</strong> · {humanize(wallet.data.kycTier)}</> : undefined} />
@@ -32,7 +32,7 @@ function AddMoney() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const idempotency = useIdempotencyKey();
-  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet });
+  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet, refetchInterval: 15_000 });
   const add = useMutation({
     mutationFn: () => walletApi.addMoney(amount, method, idempotency.keyFor({ amount, method })),
     onSuccess: (r) => {

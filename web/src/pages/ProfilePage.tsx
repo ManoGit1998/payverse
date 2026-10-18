@@ -8,6 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/feedback';
 import { AmountInput, Badge, Banner, Button, Card, Empty, ErrorBanner, KeyValue, PageHeader, Select, Spinner, Tabs, TextInput } from '../components/ui';
 import { formatDate, formatDateTime, formatMoney, humanize, isValidAmount, relativeTime } from '../lib/format';
+import { waitForWalletTier } from '../lib/waitForWalletTier';
 
 type Tab = 'profile' | 'kyc' | 'banks' | 'beneficiaries' | 'upi' | 'security';
 
@@ -74,7 +75,11 @@ function KycTab() {
   const [dob, setDob] = useState('');
   const [aadhaar, setAadhaar] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const done = () => { toast('KYC verified'); void queryClient.invalidateQueries(); };
+  const done = async () => {
+    toast('KYC verified');
+    await waitForWalletTier(kyc.data?.tier ?? 'NONE');
+    void queryClient.invalidateQueries();
+  };
   const minKyc = useMutation({ mutationFn: () => userApi.minKyc({ documentType: doc, documentNumber: number.toUpperCase(), fullName: name, dateOfBirth: dob }), onSuccess: done });
   const fullKyc = useMutation({ mutationFn: () => userApi.fullKyc(aadhaar, file!), onSuccess: done });
   if (kyc.isLoading) return <Spinner />;

@@ -16,7 +16,7 @@ function Meter({ label, used, limit }: { label: string; used: string; limit: str
 }
 
 export default function HomePage() {
-  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet });
+  const wallet = useQuery({ queryKey: ['wallet'], queryFn: walletApi.wallet, refetchInterval: 15_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: userApi.profile });
   const recent = useQuery({ queryKey: ['transactions', 'recent'], queryFn: () => transactionApi.history({ size: 5 }) });
   const requests = useQuery({ queryKey: ['money-requests', 'INCOMING'], queryFn: () => transactionApi.moneyRequests('INCOMING') });

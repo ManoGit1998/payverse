@@ -173,6 +173,7 @@ function AutoPay() {
     mutationFn: (id: string) => billApi.cancelMandate(id),
     onSuccess: () => { toast('Auto-pay cancelled'); void queryClient.invalidateQueries({ queryKey: ['mandates'] }); },
   });
+  const billerNames = useQuery({ queryKey: ['billers', 'names'], queryFn: async () => new Map((await billApi.billers()).map((b) => [b.code, b.name])) });
   return (
     <Card title="Auto-pay" action={<Button onClick={() => setCreating(true)}>Set up auto-pay</Button>}>
       {mandates.isLoading ? <Spinner /> : mandates.error ? <ErrorBanner error={mandates.error} /> : !mandates.data?.length ? (
@@ -182,7 +183,7 @@ function AutoPay() {
           {mandates.data.map((m) => (
             <li key={m.id} className="list-item">
               <div className="list-main">
-                <div className="list-title">{m.billerCode} · {m.accountRefMasked}</div>
+                <div className="list-title">{billerNames.data?.get(m.billerCode) ?? m.billerCode} · {m.accountRefMasked}</div>
                 <div className="list-sub">{humanize(m.frequency)} · {m.amount ? `${formatMoney(m.amount)} each time` : `bill up to ${formatMoney(m.maxAmount)}`} · next {formatDate(m.nextRunAt)} · {m.runCount} runs</div>
               </div>
               <Badge value={m.status} />
@@ -236,11 +237,13 @@ function CreateMandateModal({ open, onClose }: { open: boolean; onClose: () => v
             <Select label="Biller" value={biller.code} onChange={(e) => setCode(e.target.value)}>
               {billers.data!.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
             </Select>
-            <TextInput label={biller.accountLabel} value={account} onChange={(e) => setAccount(e.target.value)} />
+            <TextInput label={biller.accountLabel} value={account} onChange={(e) => setAccount(e.target.value)}
+                       error={account && !validAccount(biller, account) ? `Enter a valid ${biller.accountLabel.toLowerCase()}` : null} />
             <Select label="Frequency" value={frequency} onChange={(e) => setFrequency(e.target.value as MandateFrequency)}>
               <option value="MONTHLY">Monthly</option><option value="WEEKLY">Weekly</option>
             </Select>
-            {!biller.fetchSupported && <AmountInput label="Recharge amount" value={amount} onChange={setAmount} />}
+            {!biller.fetchSupported && <AmountInput label="Recharge amount" value={amount} onChange={setAmount}
+                                                    error={amount && maxAmount && Number(amount) > Number(maxAmount) ? 'Must not be above the limit below' : null} />}
             <AmountInput label="Never pay more than" value={maxAmount} onChange={setMaxAmount}
                          hint={biller.fetchSupported ? 'Bills above this are skipped and you are notified' : undefined} />
           </>

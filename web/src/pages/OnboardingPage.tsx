@@ -6,6 +6,7 @@ import type { IdDocumentType } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Banner, Button, ErrorBanner, Select, Spinner, TextInput } from '../components/ui';
 import { AuthLayout } from './LoginPage';
+import { waitForWalletTier } from '../lib/waitForWalletTier';
 
 const DOCS: { value: IdDocumentType; label: string; placeholder: string }[] = [
   { value: 'PAN', label: 'PAN', placeholder: 'ABCDE1234F' },
@@ -63,6 +64,7 @@ export default function OnboardingPage() {
           e.preventDefault();
           void submit(async () => {
             await userApi.minKyc({ documentType: doc, documentNumber: number.trim().toUpperCase(), fullName: name.trim(), dateOfBirth: dob });
+            await waitForWalletTier('NONE');
             await queryClient.invalidateQueries();
             navigate('/', { replace: true });
           });

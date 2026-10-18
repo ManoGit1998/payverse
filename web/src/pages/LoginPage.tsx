@@ -7,6 +7,7 @@ import { Button, ErrorBanner, TextInput } from '../components/ui';
 const MOBILE = /^[6-9]\d{9}$/;
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
+  useEffect(() => { document.title = 'Sign in · PayVerse'; }, []);
   return (
     <div className="auth-page">
       <section className="auth-hero">
