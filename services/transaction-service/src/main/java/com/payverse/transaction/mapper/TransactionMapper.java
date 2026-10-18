@@ -39,11 +39,16 @@ public interface TransactionMapper {
     default TransactionResponse toResponse(Transaction t, UUID viewer) {
         boolean sent = t.getPayerUserId().equals(viewer);
         String counterparty = sent
-                ? (t.getPayeeName() == null ? t.getPayeeRef() : t.getPayeeName() + " (" + t.getPayeeRef() + ")")
+                ? payeeLabel(t.getPayeeName(), t.getPayeeRef())
                 : (t.getPayerRef() == null ? "PayVerse user" : t.getPayerRef());
         return new TransactionResponse(t.getId(), sent ? TransactionResponse.Direction.SENT : TransactionResponse.Direction.RECEIVED,
                 counterparty, t.getPayeeType(), money(t.getAmount()), t.getStatus(), sent ? t.getFailureCode() : null, t.getNote(),
                 t.getSource(), t.getCreatedAt(), t.getCompletedAt());
+    }
+
+    /** "Ravi Sharma (ravi@payverse)"; USER payees (money requests) already carry the name in their ref. */
+    static String payeeLabel(String name, String ref) {
+        return name == null || ref.contains(name) ? ref : name + " (" + ref + ")";
     }
 
     default MoneyRequestResponse toResponse(MoneyRequest r, UUID viewer) {
