@@ -4,6 +4,7 @@ import com.payverse.notification.config.NotificationProperties;
 import com.payverse.notification.entity.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -18,16 +19,19 @@ import java.util.UUID;
 public class MockProviders {
 
     @Bean
+    @ConditionalOnProperty(name = "payverse.providers.notification-sms.adapter", havingValue = "mock", matchIfMissing = true)
     NotificationProvider mockSmsProvider(NotificationProperties properties) {
         return new MockProvider(Channel.SMS, "MockSmsProvider", properties);
     }
 
     @Bean
+    @ConditionalOnProperty(name = "payverse.providers.notification-email.adapter", havingValue = "mock", matchIfMissing = true)
     NotificationProvider mockEmailProvider(NotificationProperties properties) {
         return new MockProvider(Channel.EMAIL, "MockEmailProvider", properties);
     }
 
     @Bean
+    @ConditionalOnProperty(name = "payverse.providers.notification-push.adapter", havingValue = "mock", matchIfMissing = true)
     NotificationProvider mockPushProvider(NotificationProperties properties) {
         return new MockProvider(Channel.PUSH, "MockPushProvider", properties);
     }

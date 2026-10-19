@@ -1,0 +1,7 @@
+{
+  "provider": "Firebase Cloud Messaging HTTP v1 (https://firebase.google.com/docs/reference/fcm/rest) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/v1/projects/([^/]+)/messages:send", "status": 200,
+     "body": {"name": "projects/{{path:1}}/messages/0:{{digits:16}}%{{hex:16}}"}}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "provider": "MSG91 Flow API v5 — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/api/v5/flow", "status": 200, "body": {"type": "success", "message": "{{hex:24}}"}}
+  ]
+}

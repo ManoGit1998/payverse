@@ -1,0 +1,9 @@
+{
+  "provider": "Twilio SendGrid v3 Mail Send (https://www.twilio.com/docs/sendgrid/api-reference/mail-send) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/v3/mail/send", "when": {"header.Authorization": "Bearer .+"}, "status": 202,
+     "headers": {"X-Message-Id": "{{hex:22}}"}},
+    {"method": "POST", "path": "/v3/mail/send", "status": 401,
+     "body": {"errors": [{"message": "The provided authorization grant is invalid, expired, or revoked", "field": null, "help": null}]}}
+  ]
+}

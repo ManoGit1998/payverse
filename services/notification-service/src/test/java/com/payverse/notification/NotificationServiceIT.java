@@ -47,7 +47,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Real Postgres/Redis/Kafka. EMAIL is configured to always fail with one attempt, so e-mail
  * notifications go DEAD immediately while SMS/PUSH are SENT.
  */
-@SpringBootTest(properties = {"payverse.notification.mock-failing-channels=EMAIL", "payverse.notification.max-attempts=1",
+@SpringBootTest(properties = {"payverse.notification.mock-failing-channels=EMAIL",
+        "payverse.providers.notification-sms.adapter=mock", "payverse.providers.notification-email.adapter=mock",
+        "payverse.providers.notification-push.adapter=mock", "payverse.notification.max-attempts=1",
         "payverse.notification.dispatch-interval-ms=200"})
 @ActiveProfiles("it")
 @AutoConfigureMockMvc

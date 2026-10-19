@@ -47,6 +47,29 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: adapter = real integration (or mock); mode = stub (default responses, no network) | live
+  providers:
+    notification-sms:
+      adapter: ${NOTIFICATION_SMS_ADAPTER:msg91}
+      mode: ${NOTIFICATION_SMS_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${MSG91_BASE_URL:https://control.msg91.com}
+      credentials:
+        auth-key: ${MSG91_AUTH_KEY:}
+        template-generic: ${MSG91_TEMPLATE_NOTIFICATION:}
+    notification-email:
+      adapter: ${NOTIFICATION_EMAIL_ADAPTER:sendgrid}
+      mode: ${NOTIFICATION_EMAIL_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${SENDGRID_BASE_URL:https://api.sendgrid.com}
+      credentials:
+        api-key: ${SENDGRID_API_KEY:}
+        from-email: ${SENDGRID_FROM_EMAIL:}
+    notification-push:
+      adapter: ${NOTIFICATION_PUSH_ADAPTER:fcm}
+      mode: ${NOTIFICATION_PUSH_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${FCM_BASE_URL:https://fcm.googleapis.com}
+      credentials:
+        project-id: ${FCM_PROJECT_ID:}
+        access-token: ${FCM_ACCESS_TOKEN:}
   notification:
     max-attempts: ${NOTIFICATION_MAX_ATTEMPTS:5}
     dispatch-batch: 50
