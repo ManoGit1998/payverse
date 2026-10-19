@@ -1,0 +1,17 @@
+{
+  "provider": "RazorpayX Payouts API (https://razorpay.com/docs/api/x/payouts/) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/v1/payouts", "when": {"body.amount": "\\d*14"}, "status": 200,
+     "body": {"id": "pout_{{hex:14}}", "entity": "payout", "fund_account_id": "{{body:fund_account_id}}", "amount": "{{body:amount}}",
+              "currency": "{{body:currency}}", "fees": 0, "tax": 0, "status": "rejected", "utr": null, "mode": "{{body:mode}}",
+              "purpose": "{{body:purpose}}", "reference_id": "{{body:reference_id}}", "narration": "{{body:narration}}",
+              "status_details": {"reason": "beneficiary_bank_rejected", "description": "Beneficiary bank rejected the payout", "source": "beneficiary_bank"},
+              "created_at": "{{epoch}}"}},
+    {"method": "POST", "path": "/v1/payouts", "status": 200,
+     "body": {"id": "pout_{{hex:14}}", "entity": "payout", "fund_account_id": "{{body:fund_account_id}}", "amount": "{{body:amount}}",
+              "currency": "{{body:currency}}", "fees": 590, "tax": 90, "status": "processing", "utr": null, "mode": "{{body:mode}}",
+              "purpose": "{{body:purpose}}", "reference_id": "{{body:reference_id}}", "narration": "{{body:narration}}",
+              "status_details": {"reason": null, "description": "Payout is being processed", "source": null},
+              "created_at": "{{epoch}}"}}
+  ]
+}

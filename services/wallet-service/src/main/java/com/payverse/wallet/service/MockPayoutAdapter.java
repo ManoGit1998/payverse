@@ -5,6 +5,7 @@ import com.payverse.common.money.Money;
 import com.payverse.wallet.exception.WalletErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -14,6 +15,7 @@ import java.util.UUID;
  * (the whole withdrawal then rolls back). A real adapter would submit asynchronously via the outbox.
  */
 @Component
+@ConditionalOnProperty(name = "payverse.providers.payout.adapter", havingValue = "mock", matchIfMissing = true)
 public class MockPayoutAdapter implements PayoutGateway {
 
     private static final Logger log = LoggerFactory.getLogger(MockPayoutAdapter.class);

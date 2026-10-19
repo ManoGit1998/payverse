@@ -171,7 +171,7 @@ class WalletApiIT extends WalletIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.balance.amount").value("750.00"))
                 .andExpect(jsonPath("$.maskedAccountNumber").value("XXXXXXXX9012"))
-                .andExpect(jsonPath("$.payoutReference").value(org.hamcrest.Matchers.startsWith("MOCKIMPS-")));
+                .andExpect(jsonPath("$.payoutReference").value(org.hamcrest.Matchers.startsWith("pout_")));
         DOWNSTREAM.verify(postRequestedFor(urlEqualTo("/internal/auth/pin/verify"))
                 .withHeader(HttpHeaders.AUTHORIZATION, WireMock.matching("Bearer .+")));
 

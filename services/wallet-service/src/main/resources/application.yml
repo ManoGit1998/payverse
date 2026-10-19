@@ -44,6 +44,16 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: adapter = real integration (or mock); mode = stub (default responses, no network) | live
+  providers:
+    payout:
+      adapter: ${PAYOUT_ADAPTER:razorpayx}
+      mode: ${PAYOUT_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${RAZORPAYX_BASE_URL:https://api.razorpay.com}
+      credentials:
+        key-id: ${RAZORPAYX_KEY_ID:}
+        key-secret: ${RAZORPAYX_KEY_SECRET:}
+        account-number: ${RAZORPAYX_ACCOUNT_NUMBER:}
   wallet:
     auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}
     user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
