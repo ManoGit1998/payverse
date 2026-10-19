@@ -1,0 +1,9 @@
+{
+  "provider": "MSG91 Flow API v5 (https://docs.msg91.com) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/api/v5/flow", "when": {"header.authkey": ".+"}, "status": 200,
+     "body": {"type": "success", "message": "{{hex:24}}"}},
+    {"method": "POST", "path": "/api/v5/flow", "status": 401,
+     "body": {"type": "error", "message": "Authentication failure", "code": "201"}}
+  ]
+}

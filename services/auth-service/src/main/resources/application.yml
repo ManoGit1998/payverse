@@ -41,12 +41,22 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: mode = stub (default responses, no network) | live. OTP_SENDER picks msg91 or log (old mock).
+  providers:
+    sms:
+      adapter: msg91
+      mode: ${SMS_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${MSG91_BASE_URL:https://control.msg91.com}
+      credentials:
+        auth-key: ${MSG91_AUTH_KEY:}
+        template-login: ${MSG91_TEMPLATE_LOGIN:}
+        template-pin-reset: ${MSG91_TEMPLATE_PIN_RESET:}
   auth:
     issuer: ${JWT_ISSUER:http://localhost:8081}
     access-token-ttl: 15m
     refresh-token-ttl: 30d
     otp:
-      sender: ${OTP_SENDER:log}     # MOCK LogOtpSender in dev — see README
+      sender: ${OTP_SENDER:msg91}   # msg91 (STUB mode logs the code for dev) | log (old MOCK LogOtpSender)
       ttl: 5m
       length: 6
       max-requests: 3
