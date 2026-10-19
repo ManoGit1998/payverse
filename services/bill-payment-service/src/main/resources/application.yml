@@ -44,6 +44,15 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: adapter = real integration (or mock); mode = stub (default responses, no network) | live
+  providers:
+    biller:
+      adapter: ${BILLER_ADAPTER:bbps}
+      mode: ${BILLER_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${BBPS_BASE_URL:https://bbps.aggregator.example}
+      credentials:
+        api-key: ${BBPS_API_KEY:}
+        agent-id: ${BBPS_AGENT_ID:}
   bill:
     wallet-service-url: ${WALLET_SERVICE_URL:http://localhost:8083}
     auth-service-url: ${AUTH_SERVICE_URL:http://localhost:8081}

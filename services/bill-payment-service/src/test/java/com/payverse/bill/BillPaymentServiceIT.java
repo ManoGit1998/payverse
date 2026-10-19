@@ -136,7 +136,7 @@ class BillPaymentServiceIT {
 
         String key = UUID.randomUUID().toString();
         String body = pay(key, "4826", "CITY_POWER", consumer, due).andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("SUCCESS")).andExpect(jsonPath("$.billerRef").value(org.hamcrest.Matchers.startsWith("MOCKBBPS-")))
+                .andExpect(jsonPath("$.status").value("SUCCESS")).andExpect(jsonPath("$.billerRef").value(org.hamcrest.Matchers.startsWith("BBPS")))
                 .andExpect(jsonPath("$.accountRefMasked").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(consumer))))
                 .andReturn().getResponse().getContentAsString();
         String id = JsonPath.read(body, "$.id");

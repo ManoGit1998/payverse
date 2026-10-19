@@ -6,6 +6,7 @@ import com.payverse.common.money.Money;
 import com.payverse.common.web.masking.PiiMasker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentMap;
  * are declined (→ refund); amounts ending in {@code .14} time out on the first attempt only.
  */
 @Component
+@ConditionalOnProperty(name = "payverse.providers.biller.adapter", havingValue = "mock", matchIfMissing = true)
 public class MockBillerAdapter implements BillerGateway {
 
     private static final Logger log = LoggerFactory.getLogger(MockBillerAdapter.class);

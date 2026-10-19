@@ -1,0 +1,19 @@
+{
+  "provider": "BBPS biller aggregator (fetch / pay) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/bbps/v1/bills/fetch", "when": {"body.customer_params.account_ref": ".*0000"}, "status": 200,
+     "body": {"status": "FAILURE", "ref_id": "{{body:ref_id}}", "error": {"code": "ACCOUNT_NOT_FOUND", "message": "Customer account not found"}}},
+    {"method": "POST", "path": "/bbps/v1/bills/fetch", "status": 200,
+     "body": {"status": "SUCCESS", "ref_id": "{{body:ref_id}}",
+              "bill": {"customer_name": "Customer {{body:customer_params.account_ref}}", "bill_number": "BILL-{{hex:10}}",
+                       "amount": "{{hash:body:customer_params.account_ref:15000:415000}}", "bill_date": "{{date:+0}}",
+                       "due_date": "{{date:+10}}"}}},
+    {"method": "POST", "path": "/bbps/v1/bills/pay", "when": {"body.amount": "\\d*13"}, "status": 200,
+     "body": {"status": "FAILURE", "ref_id": "{{body:ref_id}}", "error": {"code": "BILLER_DECLINED", "message": "Payment declined by the biller"}}},
+    {"method": "POST", "path": "/bbps/v1/bills/pay", "when": {"body.amount": "\\d*14"}, "status": 504, "times": 1, "onceKey": "{{body:ref_id}}",
+     "body": {"status": "PENDING", "ref_id": "{{body:ref_id}}", "message": "Biller did not respond in time"}},
+    {"method": "POST", "path": "/bbps/v1/bills/pay", "status": 200,
+     "body": {"status": "SUCCESS", "ref_id": "{{body:ref_id}}", "txn_ref_id": "BBPS{{hex:12}}", "approval_ref": "{{digits:10}}",
+              "amount": "{{body:amount}}"}}
+  ]
+}
