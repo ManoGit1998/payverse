@@ -3,6 +3,7 @@ package com.payverse.user.service;
 import com.payverse.user.model.IdDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -14,6 +15,7 @@ import java.util.UUID;
  * (e.g. PAN {@code ABCDE9999F}). Replace with a real KYC/OVD provider in production.
  */
 @Component
+@ConditionalOnProperty(name = "payverse.providers.kyc.adapter", havingValue = "mock", matchIfMissing = true)
 public class MockKycVerifier implements KycVerifier {
 
     static final String REJECT_MARKER = "9999";

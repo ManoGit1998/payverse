@@ -48,6 +48,25 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: adapter = real integration (or mock); mode = stub (default responses, no network) | live
+  providers:
+    kyc:
+      adapter: ${KYC_ADAPTER:setu}
+      mode: ${KYC_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${SETU_BASE_URL:https://dg-sandbox.setu.co}
+      credentials:
+        client-id: ${SETU_CLIENT_ID:}
+        client-secret: ${SETU_CLIENT_SECRET:}
+        product-instance-id: ${SETU_PRODUCT_INSTANCE_ID:}
+    document-storage:
+      adapter: ${DOCUMENT_STORAGE_ADAPTER:s3}
+      mode: ${DOCUMENT_STORAGE_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${S3_BUCKET_ENDPOINT:https://payverse-kyc-documents.s3.ap-south-1.amazonaws.com}
+      credentials:
+        access-key-id: ${AWS_ACCESS_KEY_ID:}
+        secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+        region: ${AWS_REGION:ap-south-1}
+        bucket: ${S3_BUCKET:payverse-kyc-documents}
   security:
     jwk-set-uri: ${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json
     issuer: ${JWT_ISSUER:http://localhost:8081}

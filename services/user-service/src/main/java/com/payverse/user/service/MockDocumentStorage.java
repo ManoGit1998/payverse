@@ -2,6 +2,7 @@ package com.payverse.user.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.security.MessageDigest;
@@ -14,6 +15,7 @@ import java.util.UUID;
  * (no PII files on developer laptops). Replace with an encrypted object store (S3 + KMS) in production.
  */
 @Component
+@ConditionalOnProperty(name = "payverse.providers.document-storage.adapter", havingValue = "mock", matchIfMissing = true)
 public class MockDocumentStorage implements DocumentStorage {
 
     private static final Logger log = LoggerFactory.getLogger(MockDocumentStorage.class);

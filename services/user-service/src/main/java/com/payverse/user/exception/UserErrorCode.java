@@ -13,6 +13,7 @@ public enum UserErrorCode implements ErrorCode {
     USER_KYC_DOCUMENT_IN_USE(409, "This identity document is already linked to another account"),
     USER_KYC_DOCUMENT_TOO_LARGE(413, "Document is too large"),
     USER_KYC_UNSUPPORTED_FILE(415, "Unsupported document type"),
+    USER_KYC_PROVIDER_UNAVAILABLE(503, "Identity verification is unavailable right now, try again shortly"),
     USER_BANK_ACCOUNT_INVALID(400, "Invalid bank account details"),
     USER_BANK_ACCOUNT_DUPLICATE(409, "Bank account already linked"),
     USER_BANK_ACCOUNT_LIMIT(422, "Maximum number of bank accounts reached"),

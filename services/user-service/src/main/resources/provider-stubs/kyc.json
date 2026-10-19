@@ -1,0 +1,20 @@
+{
+  "provider": "Setu KYC APIs (https://docs.setu.co/data/pan) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/api/verify/pan", "when": {"body.pan": ".*9999.*"}, "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "FAILED", "message": "PAN is invalid", "traceId": "1-{{hex:8}}-{{hex:24}}"}},
+    {"method": "POST", "path": "/api/verify/pan", "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "SUCCESS", "message": "PAN is valid", "traceId": "1-{{hex:8}}-{{hex:24}}",
+              "data": {"category": "Individual", "aadhaar_seeding_status": "LINKED"}}},
+    {"method": "POST", "path": "/api/verify/voter-id", "when": {"body.epic_number": ".*9999.*"}, "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "FAILED", "message": "EPIC number not found", "traceId": "1-{{hex:8}}-{{hex:24}}"}},
+    {"method": "POST", "path": "/api/verify/driving-licence", "when": {"body.dl_number": ".*9999.*"}, "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "FAILED", "message": "Driving licence not found", "traceId": "1-{{hex:8}}-{{hex:24}}"}},
+    {"method": "POST", "path": "/api/verify/passport", "when": {"body.file_number": ".*9999.*"}, "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "FAILED", "message": "Passport not found", "traceId": "1-{{hex:8}}-{{hex:24}}"}},
+    {"method": "POST", "path": "/api/verify/aadhaar", "when": {"body.aadhaar_number": ".*9999.*"}, "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "FAILED", "message": "Aadhaar number is invalid", "traceId": "1-{{hex:8}}-{{hex:24}}"}},
+    {"method": "POST", "path": "/api/verify/(voter-id|driving-licence|passport|aadhaar)", "status": 200,
+     "body": {"id": "{{uuid}}", "verification": "SUCCESS", "message": "Document is valid", "traceId": "1-{{hex:8}}-{{hex:24}}", "data": {}}}
+  ]
+}

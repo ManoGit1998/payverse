@@ -1,0 +1,8 @@
+{
+  "provider": "Amazon S3 PutObject (SigV4, SSE-KMS) — default responses for STUB mode",
+  "rules": [
+    {"method": "PUT", "path": "/kyc/.+", "when": {"header.Authorization": "AWS4-HMAC-SHA256 Credential=.+"}, "status": 200,
+     "headers": {"ETag": "\"{{hex:32}}\"", "x-amz-server-side-encryption": "aws:kms", "x-amz-request-id": "{{hex:16}}"}},
+    {"method": "PUT", "path": ".*", "status": 403, "body": {"Code": "AccessDenied", "Message": "Access Denied"}}
+  ]
+}
