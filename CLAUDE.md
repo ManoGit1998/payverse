@@ -53,7 +53,7 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
 - Service-to-service: `POST /api/v1/auth/oauth/token` (client_credentials) issues role `SERVICE`. Dev uses one shared `SERVICE_CLIENT_SECRET`.
 - Mobile → userId resolution is owned by auth (`/internal/auth/users/lookup`); user-service stores only the masked mobile.
 - (Superseded on 2026-10-14 by the layered restructure: entities are JPA classes with Lombok getters; MapStruct maps them.)
-- Mocks: `LogOtpSender` (OTP in logs, `make otp`), `MockKycVerifier` (rejects numbers containing `9999`), `MockDocumentStorage` (discards bytes).
+- Mocks: `LogOtpSender` (OTP in logs, `make otp`), `MockKycVerifier` (rejects numbers containing `9999`), `MockDocumentStorage` (discards bytes). Superseded as defaults on 2026-10-19 by real adapters in STUB mode (see External provider integrations); `*_ADAPTER=mock` still selects them.
 - `@Transactional(noRollbackFor = PayverseException.class)` wherever a failed attempt must be persisted (PIN failures, refresh reuse revocation, KYC rejections).
 - Docker Postgres is published on host port **5433** (`POSTGRES_PORT`): the dev Mac runs a native PostgreSQL 18 on 5432.
 - Service containers: `mem_limit 512m`, `-Xmx256m`, capped metaspace / code cache / direct memory, `MALLOC_ARENA_MAX=2`
@@ -186,6 +186,23 @@ Boot (OTel 1.62 → appender **2.28.0-alpha**). A newer appender fails at runtim
   honours the record TTL; after `docker compose up` recreated a service with a new IP, the gateway kept dialing the old one and
   the circuit breaker answered 503 until the gateway restarted.
 - Transaction labels: `TransactionMapper.payeeLabel` no longer doubles the name for USER payees (money requests).
+
+## External provider integrations (2026-10-19)
+
+- Every external port has a real adapter (docs/EXTERNAL-PROVIDERS.md): MSG91 (OTP + SMS), Setu (KYC), S3 SigV4 + SSE-KMS
+  (KYC documents), RazorpayX (payouts), Razorpay Orders (add money), PSP-bank UPI, BBPS aggregator, SendGrid, FCM v1.
+  Default `mode: stub`: the adapter's real request/response code runs, but `StubClientHttpRequestFactory` answers with
+  provider-shaped default responses from `provider-stubs/<key>.json` (rules + templates). `PROVIDERS_MODE=live` or
+  `<KEY>_MODE=live` + credentials goes live; LIVE with missing credentials fails at startup. `<KEY>_ADAPTER=mock` restores
+  the old simulators (still the code default via `matchIfMissing`, but every application.yml selects the real adapter).
+- Stub rules reproduce the documented test triggers (.13 declines, .14 payout reject / biller timeout once, 0000 unknown
+  account, 9999 KYC reject), so e2e/smoke and ITs behave as before. References now look real: `pay_…`, `pout_…`, `BBPS…`.
+- MSG91 in STUB still logs `[MOCK SMS] … OTP for … is …` (make otp, e2e); never in LIVE. `OTP_SENDER` default is msg91.
+- Provider clients are JDK HTTP/1.1 (h2c upgrade on plain-http sandboxes was reset by servers) and fall back to
+  `RestClient.builder()` when a service has no Boot builder bean (auth-service).
+- Notification adapters need contacts: `RecipientDirectory`; the default returns placeholders that LIVE refuses.
+- `ProviderProperties` binds `@ConfigurationProperties("payverse")` → `payverse.providers.<key>` (a record component
+  named `providers`; binding under `payverse.providers` would have produced `payverse.providers.entries.<key>`).
 
 ## Phase 8 decisions
 

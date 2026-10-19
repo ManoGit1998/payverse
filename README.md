@@ -110,6 +110,13 @@ VS Code (REST Client) and run the requests with the `local` environment.
 | http://localhost:8080/swagger-ui.html | Aggregated Swagger UI (services appear as they are built) |
 | http://localhost:3000 | Grafana (admin / admin): Explore → Tempo (traces), Loki (logs), Prometheus (metrics) |
 
+## External providers
+
+Payment gateway (Razorpay), payouts (RazorpayX), OTP/SMS (MSG91), KYC (Setu), document storage (S3), UPI (sponsor bank),
+bills (BBPS), e-mail (SendGrid) and push (FCM) are real integrations that run in **stub mode** by default: real requests
+and response parsing, answered with provider-shaped default responses. Set `PROVIDERS_MODE=live` and the provider
+credentials to go live — see [docs/EXTERNAL-PROVIDERS.md](docs/EXTERNAL-PROVIDERS.md).
+
 ## Web app
 
 `web/` is a React + TypeScript SPA on the gateway API: the customer wallet (pay, requests, wallet, history,

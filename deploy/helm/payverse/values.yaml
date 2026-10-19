@@ -44,7 +44,10 @@ config:
   logFormat: logstash
   tracingSamplingProbability: "0.1"
   corsAllowedOrigins: https://app.payverse.example
-  otpSender: log                    # MOCK: OTPs go to the auth-service log
+  otpSender: msg91                  # msg91 (real integration) | log (old mock); STUB mode also logs the code
+  # External providers: stub = provider-shaped default responses, live = real calls. Put provider credentials
+  # (RAZORPAY_KEY_ID, MSG91_AUTH_KEY, SETU_CLIENT_ID, … see docs/EXTERNAL-PROVIDERS.md) in the Secret.
+  providersMode: stub
   riskAssessor: remote
   jwtIssuer: ""                     # defaults to the in-cluster auth-service URL
 

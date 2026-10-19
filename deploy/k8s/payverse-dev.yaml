@@ -145,7 +145,8 @@ data:
   ADMIN_SERVICE_URL: http://payverse-admin-service:8091
   JWT_ISSUER: "http://payverse-auth-service:8081"
   CORS_ALLOWED_ORIGINS: "https://app.payverse.example"
-  OTP_SENDER: "log"
+  OTP_SENDER: "msg91"
+  PROVIDERS_MODE: "stub"
   RISK_ASSESSOR: "remote"
   LOG_FORMAT: "logstash"
   TRACING_SAMPLING_PROBABILITY: "0.1"
@@ -2733,7 +2734,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: admin-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -2823,7 +2824,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: api-gateway
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -2914,7 +2915,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: auth-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3004,7 +3005,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: bill-payment-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3094,7 +3095,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: fraud-risk-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3184,7 +3185,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: notification-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3274,7 +3275,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: payment-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3364,7 +3365,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: reconciliation-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3454,7 +3455,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: rewards-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3544,7 +3545,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: transaction-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3634,7 +3635,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: user-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:
@@ -3724,7 +3725,7 @@ spec:
         helm.sh/chart: payverse-0.1.0
         app.kubernetes.io/name: wallet-service
       annotations:
-        checksum/config: af607e4d57efe5f8e51c6383b6b96bbb8691fcce38b15730616f0cdad9a2b8cb
+        checksum/config: f86a3e234b38df5c8eed3556a13846c4b71b8666dbd6ca8974c812ca689c3e27
     spec:
       terminationGracePeriodSeconds: 40
       securityContext:

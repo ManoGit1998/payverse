@@ -36,6 +36,7 @@ data:
   JWT_ISSUER: {{ .Values.config.jwtIssuer | default (printf "http://%s-auth-service:8081" $fullname) | quote }}
   CORS_ALLOWED_ORIGINS: {{ .Values.config.corsAllowedOrigins | quote }}
   OTP_SENDER: {{ .Values.config.otpSender | quote }}
+  PROVIDERS_MODE: {{ .Values.config.providersMode | default "stub" | quote }}
   RISK_ASSESSOR: {{ .Values.config.riskAssessor | quote }}
   LOG_FORMAT: {{ .Values.config.logFormat | quote }}
   TRACING_SAMPLING_PROBABILITY: {{ .Values.config.tracingSamplingProbability | quote }}
