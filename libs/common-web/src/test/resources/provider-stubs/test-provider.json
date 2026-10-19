@@ -1,0 +1,13 @@
+{
+  "rules": [
+    {"method": "POST", "path": "/v1/pay", "when": {"body.amount": "\\d*13"}, "status": 400,
+     "body": {"error": {"code": "DECLINED", "description": "declined"}}},
+    {"method": "POST", "path": "/v1/pay", "when": {"body.amount": "\\d*14"}, "status": 504, "times": 1, "onceKey": "{{body:ref}}",
+     "body": {"error": "timeout"}},
+    {"method": "POST", "path": "/v1/pay", "status": 200, "headers": {"X-Request-Id": "req_{{hex:8}}"},
+     "body": {"id": "pay_{{hex:14}}", "amount": "{{body:amount}}", "ref": "{{body:ref}}", "note": "for {{body:customer.name}}",
+              "bill": "{{hash:body:ref:100:200}}", "due": "{{date:+10}}"}},
+    {"method": "GET", "path": "/v1/orders/(order_[A-Za-z0-9]+)/payments", "status": 200,
+     "body": {"order": "{{path:1}}", "country": "{{query:country}}"}}
+  ]
+}
