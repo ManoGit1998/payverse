@@ -48,6 +48,22 @@ spring:
         max.in.flight.requests.per.connection: 5
 
 payverse:
+  # External providers: adapter = real integration (or mock); mode = stub (default responses, no network) | live
+  providers:
+    payment-gateway:
+      adapter: ${PAYMENT_GATEWAY_ADAPTER:razorpay}
+      mode: ${PAYMENT_GATEWAY_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${RAZORPAY_BASE_URL:https://api.razorpay.com}
+      credentials:
+        key-id: ${RAZORPAY_KEY_ID:}
+        key-secret: ${RAZORPAY_KEY_SECRET:}
+    upi-switch:
+      adapter: ${UPI_SWITCH_ADAPTER:psp-bank}
+      mode: ${UPI_SWITCH_MODE:${PROVIDERS_MODE:stub}}
+      base-url: ${UPI_PSP_BASE_URL:https://upi.sponsor-bank.example}
+      credentials:
+        merchant-id: ${UPI_PSP_MERCHANT_ID:}
+        api-key: ${UPI_PSP_API_KEY:}
   payment:
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://localhost:8084}
     user-service-url: ${USER_SERVICE_URL:http://localhost:8082}

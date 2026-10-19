@@ -308,7 +308,7 @@ class PaymentServiceIT {
         String body = "{\"userId\":\"" + user + "\",\"amount\":500,\"method\":\"UPI\",\"idempotencyKey\":\"" + key + "\"}";
         String first = mvc.perform(post("/internal/pg/charges").header(HttpHeaders.AUTHORIZATION, service()).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUCCEEDED"))
-                .andExpect(jsonPath("$.providerReference").value(org.hamcrest.Matchers.startsWith("MOCKPG-")))
+                .andExpect(jsonPath("$.providerReference").value(org.hamcrest.Matchers.startsWith("pay_")))
                 .andReturn().getResponse().getContentAsString();
         String second = mvc.perform(post("/internal/pg/charges").header(HttpHeaders.AUTHORIZATION, service()).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andReturn().getResponse().getContentAsString();
@@ -319,7 +319,7 @@ class PaymentServiceIT {
         mvc.perform(post("/internal/pg/charges").header(HttpHeaders.AUTHORIZATION, service()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userId\":\"" + user + "\",\"amount\":100.13,\"method\":\"CARD\",\"idempotencyKey\":\"" + UUID.randomUUID() + "\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DECLINED"))
-                .andExpect(jsonPath("$.failureReason").value(org.hamcrest.Matchers.containsString(".13")));
+                .andExpect(jsonPath("$.failureReason").value("Declined by issuer"));
 
         String window = "from=" + java.time.Instant.now().minusSeconds(600) + "&to=" + java.time.Instant.now().plusSeconds(60);
         String charges = mvc.perform(get("/internal/pg/charges?size=1000&" + window).header(HttpHeaders.AUTHORIZATION, service()))

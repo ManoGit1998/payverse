@@ -1,0 +1,22 @@
+{
+  "provider": "Razorpay Orders API (https://razorpay.com/docs/api/orders/) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/v1/orders", "when": {"body.amount": "\\d*13"}, "status": 200,
+     "body": {"id": "order_STUBDECLINED{{hex:6}}", "entity": "order", "amount": "{{body:amount}}", "amount_paid": 0,
+              "amount_due": "{{body:amount}}", "currency": "{{body:currency}}", "receipt": "{{body:receipt}}",
+              "status": "attempted", "attempts": 1, "notes": "{{body:notes}}", "created_at": "{{epoch}}"}},
+    {"method": "POST", "path": "/v1/orders", "status": 200,
+     "body": {"id": "order_{{hex:14}}", "entity": "order", "amount": "{{body:amount}}", "amount_paid": "{{body:amount}}",
+              "amount_due": 0, "currency": "{{body:currency}}", "receipt": "{{body:receipt}}", "status": "paid",
+              "attempts": 1, "notes": "{{body:notes}}", "created_at": "{{epoch}}"}},
+    {"method": "GET", "path": "/v1/orders/(order_STUBDECLINED\\w+)/payments", "status": 200,
+     "body": {"entity": "collection", "count": 1, "items": [
+       {"id": "pay_{{hex:14}}", "entity": "payment", "currency": "INR", "status": "failed", "order_id": "{{path:1}}",
+        "method": "upi", "captured": false, "error_code": "BAD_REQUEST_ERROR", "error_source": "customer",
+        "error_reason": "payment_failed", "error_description": "Declined by issuer", "created_at": "{{epoch}}"}]}},
+    {"method": "GET", "path": "/v1/orders/(order_\\w+)/payments", "status": 200,
+     "body": {"entity": "collection", "count": 1, "items": [
+       {"id": "pay_{{hex:14}}", "entity": "payment", "currency": "INR", "status": "captured", "order_id": "{{path:1}}",
+        "method": "upi", "captured": true, "error_code": null, "error_description": null, "created_at": "{{epoch}}"}]}}
+  ]
+}

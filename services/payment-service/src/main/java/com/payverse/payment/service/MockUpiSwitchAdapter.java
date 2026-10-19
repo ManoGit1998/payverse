@@ -8,6 +8,7 @@ import com.payverse.payment.model.VpaHandle;
 import com.payverse.payment.repository.VpaRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -18,6 +19,7 @@ import java.util.UUID;
  * PAYMENT_VPA_EXTERNAL_UNSUPPORTED. RRNs are 12 digits derived from the transaction id (idempotent).
  */
 @Component
+@ConditionalOnProperty(name = "payverse.providers.upi-switch.adapter", havingValue = "mock", matchIfMissing = true)
 public class MockUpiSwitchAdapter implements UpiSwitch {
 
     private static final Logger log = LoggerFactory.getLogger(MockUpiSwitchAdapter.class);

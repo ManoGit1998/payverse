@@ -1,0 +1,12 @@
+{
+  "provider": "Sponsor/PSP bank UPI API (validate address, pay) — default responses for STUB mode",
+  "rules": [
+    {"method": "POST", "path": "/upi/v1/vpa/validate", "when": {"body.vpa": ".*(unknown|invalid).*@.*"}, "status": 200,
+     "body": {"status": "INVALID", "vpa": "{{body:vpa}}", "message": "VPA does not exist"}},
+    {"method": "POST", "path": "/upi/v1/vpa/validate", "status": 200,
+     "body": {"status": "VALID", "vpa": "{{body:vpa}}", "payee_name": "UPI customer", "ifsc": "STUB0000001"}},
+    {"method": "POST", "path": "/upi/v1/payments", "status": 200,
+     "body": {"status": "SUCCESS", "txn_id": "{{body:txn_id}}", "rrn": "{{digits:12}}", "npci_txn_id": "PSP{{hex:20}}",
+              "response_code": "00", "message": "Transaction successful"}}
+  ]
+}
